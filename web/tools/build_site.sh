@@ -6,9 +6,8 @@ OUT="$ROOT/_site"
 rm -rf "$OUT"
 mkdir -p "$OUT/data"
 
-cp "$ROOT/web/index.html" "$OUT/"
+cp "$ROOT/web/index.html" "$ROOT/web/sw.js" "$ROOT/web/manifest.webmanifest" "$ROOT/web/icon.svg" "$OUT/"
 cp -r "$ROOT/web/src" "$OUT/src"
-cp "$ROOT/assets/img/fabric_texture.png" "$OUT/data/"
 touch "$OUT/.nojekyll"
 
 # Python sources (original GarmentCode library + garment programs + presets) for Pyodide

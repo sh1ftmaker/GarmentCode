@@ -2,12 +2,16 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>GarmentCode 3D Configurator</title>
-  <meta name="description" content="Unofficial in-browser 3D configurator for GarmentCode parametric sewing patterns, built with three.js and Pyodide.">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👗</text></svg>">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>GarmentCode 3D Studio</title>
+  <meta name="description" content="Unofficial in-browser studio for GarmentCode parametric sewing patterns: design, fit on a measurement-driven mannequin, drape in 3D and lay out patterns for cutting.">
+  <meta name="theme-color" content="#f5f1ea" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#141517" media="(prefers-color-scheme: dark)">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="src/style.css">
   <script type="importmap">
     {
@@ -17,92 +21,221 @@
       }
     }
   </script>
+  <script src="https://cdn.jsdelivr.net/npm/clipper-lib@6.4.2/clipper.js" defer></script>
 </head>
 <body>
-  <div id="app">
-    <aside id="sidebar">
-      <header class="brand">
-        <div>
-          <h1>GarmentCode 3D</h1>
-          <p class="sub">Unofficial web configurator · <a href="https://github.com/sh1ftmaker/GarmentCode" target="_blank" rel="noopener">source</a></p>
-        </div>
-        <button id="sheet-toggle" class="icon-btn mobile-only" aria-label="Toggle parameters">▾</button>
-      </header>
-      <nav class="tabs" role="tablist">
-        <button class="tab active" data-tab="design" role="tab">Design</button>
-        <button class="tab" data-tab="body" role="tab">Body</button>
-        <button class="tab" data-tab="sim" role="tab">Simulation</button>
+  <div id="app" class="app">
+    <header class="topbar">
+      <a class="brand" href="#" id="brand" aria-label="GarmentCode 3D Studio">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-text"><b>GarmentCode</b> 3D Studio</span>
+        <span class="badge">unofficial</span>
+      </a>
+      <nav class="modes" role="tablist" aria-label="Workspace">
+        <button class="mode active" data-mode="design" role="tab" aria-selected="true"><span class="mi"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M8.1 8.1 20 20M8.1 15.9 20 4"/></svg></span><span>Design</span></button>
+        <button class="mode" data-mode="body" role="tab" aria-selected="false"><span class="mi"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="2.5"/><path d="M7 9.5h10l-1.5 5H14l-.5 7h-3l-.5-7H8.5z"/></svg></span><span>Body</span></button>
+        <button class="mode" data-mode="fabric" role="tab" aria-selected="false"><span class="mi"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6c3-2 5 2 8 0s5-2 8 0v12c-3-2-5 2-8 0s-5-2-8 0z"/></svg></span><span>Fabric</span></button>
+        <button class="mode" data-mode="cut" role="tab" aria-selected="false"><span class="mi"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4" width="17" height="16" rx="1.5"/><path d="M9 4v16M3.5 11H20.5" stroke-dasharray="2 2"/></svg></span><span>Cutting</span></button>
       </nav>
-      <div class="tab-pages">
-        <section class="page active" data-page="design">
-          <div class="row-btns">
-            <button id="btn-random" class="btn primary">🎲 Random design</button>
-            <button id="btn-reset" class="btn">Reset</button>
+      <div class="actions">
+        <button class="icon-btn" id="btn-undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></button>
+        <button class="icon-btn" id="btn-redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/></svg></button>
+        <button class="btn ghost hide-sm" id="btn-saves" title="My designs">My designs</button>
+        <button class="btn ghost hide-sm" id="btn-share" title="Copy a link to this design">Share</button>
+        <div class="menu">
+          <button class="btn primary" id="btn-export" aria-haspopup="true">Export</button>
+          <div class="menu-pop" id="export-menu" hidden>
+            <div class="menu-label">Sewing pattern</div>
+            <button data-x="pdf-tiles">Printable PDF (A4 / Letter tiles)</button>
+            <button data-x="pdf-full">Full-size cutting layout PDF</button>
+            <button data-x="svg-layout">Cutting layout SVG</button>
+            <button data-x="dxf">DXF for CAD / cutters</button>
+            <button data-x="svg">GarmentCode pattern SVG</button>
+            <button data-x="spec">Pattern specification JSON</button>
+            <div class="menu-label">3D</div>
+            <button data-x="glb">Draped garment (GLB)</button>
+            <button data-x="obj">Draped garment (OBJ)</button>
+            <button data-x="video">Turntable video (WebM)</button>
+            <button data-x="png">Screenshot (PNG)</button>
+            <div class="menu-label">Parameters</div>
+            <button data-x="design">Design parameters (YAML)</button>
+            <button data-x="body">Body measurements (YAML)</button>
+            <button data-x="share" class="show-sm">Copy share link</button>
+            <button data-x="saves" class="show-sm">My designs</button>
           </div>
-          <div id="design-params" class="params"><p class="muted">Loading…</p></div>
-        </section>
-        <section class="page" data-page="body">
-          <label class="field">
-            <span>Body model</span>
+        </div>
+        <button class="icon-btn" id="btn-theme" title="Toggle theme" aria-label="Toggle dark mode"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 0 0 16z" fill="currentColor"/></svg></button>
+        <button class="icon-btn" id="btn-about" title="About" aria-label="About"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.6"/><circle cx="12" cy="17" r=".6" fill="currentColor"/></svg></button>
+      </div>
+    </header>
+
+    <aside class="panel" id="panel" aria-label="Controls">
+      <div class="sheet-handle" id="sheet-handle" aria-hidden="true"><span></span></div>
+
+      <!-- DESIGN -->
+      <section class="page active" data-page="design">
+        <div class="page-head">
+          <h2>Design</h2>
+          <p class="muted">Pick a starting point, then tune GarmentCode's parameters.</p>
+        </div>
+        <div class="templates" id="templates"></div>
+        <div class="toolrow">
+          <button class="btn" id="btn-random" title="Randomise unlocked parameters">🎲 Surprise me</button>
+          <button class="btn ghost" id="btn-reset">Reset</button>
+          <button class="btn ghost" id="btn-upload">Open .yaml</button>
+          <input id="file-input" type="file" accept=".yaml,.yml,.json" hidden>
+        </div>
+        <div class="toolrow">
+          <input id="param-search" class="search" type="search" placeholder="Search parameters…" aria-label="Search parameters">
+          <div class="seg" role="group" aria-label="Detail level">
+            <button class="seg-btn active" data-detail="simple">Essentials</button>
+            <button class="seg-btn" data-detail="all">All</button>
+          </div>
+        </div>
+        <div id="design-params" class="params"><p class="muted">Loading GarmentCode…</p></div>
+      </section>
+
+      <!-- BODY -->
+      <section class="page" data-page="body">
+        <div class="page-head">
+          <h2>Body</h2>
+          <p class="muted">Enter measurements. The mannequin morphs and the pattern is re-drafted to fit.</p>
+        </div>
+        <div class="toolrow">
+          <label class="field inline grow"><span>Base shape</span>
             <select id="body-select">
-              <option value="neutral">Neutral (mean_all)</option>
-              <option value="female">Female (mean_female)</option>
-              <option value="male">Male (mean_male)</option>
+              <option value="neutral">Neutral</option>
+              <option value="female">Female</option>
+              <option value="male">Male</option>
             </select>
           </label>
-          <p class="muted small">Measurements drive the sewing pattern. The mannequin mesh is the selected preset and does not morph, so large changes may not fit it.</p>
-          <div id="body-params" class="params"></div>
-        </section>
-        <section class="page" data-page="sim">
-          <label class="field"><span>Mesh resolution <b id="res-val">2.0 cm</b></span>
-            <input id="res" type="range" min="1.2" max="4" step="0.1" value="2"></label>
-          <label class="field"><span>Bending stiffness <b id="bend-val"></b></span>
-            <input id="bend" type="range" min="0" max="1" step="0.01" value="0.5"></label>
-          <label class="field"><span>Friction <b id="fric-val"></b></span>
-            <input id="fric" type="range" min="0" max="1" step="0.01" value="0.5"></label>
-          <label class="check"><input id="auto-drape" type="checkbox" checked> Drape automatically</label>
-          <label class="check"><input id="release-attach" type="checkbox"> Release waist/neck attachments after 400 frames (as GarmentCode's simulator does)</label>
-          <label class="check"><input id="show-body" type="checkbox" checked> Show body</label>
-          <label class="check"><input id="panel-colors" type="checkbox"> Color panels</label>
-          <label class="check"><input id="wire" type="checkbox"> Wireframe</label>
-          <label class="field"><span>Fabric color</span><input id="fabric-color" type="color" value="#c9d6ea"></label>
-        </section>
-      </div>
-      <footer class="side-foot">
-        <div class="row-btns">
-          <button id="btn-upload" class="btn">Load design .yaml</button>
-          <input id="file-input" type="file" accept=".yaml,.yml,.json" hidden>
-          <div class="menu">
-            <button id="btn-download" class="btn">Download ▾</button>
-            <div id="download-menu" class="menu-pop" hidden>
-              <button data-dl="spec">Pattern specification (.json)</button>
-              <button data-dl="svg">Sewing pattern (.svg)</button>
-              <button data-dl="design">Design parameters (.yaml)</button>
-              <button data-dl="body">Body parameters (.yaml)</button>
-              <button data-dl="obj">Draped garment (.obj)</button>
-            </div>
+          <div class="seg" role="group" aria-label="Units">
+            <button class="seg-btn active" data-unit="cm">cm</button>
+            <button class="seg-btn" data-unit="in">in</button>
           </div>
         </div>
-        <p class="disclaimer">Not affiliated with or endorsed by the GarmentCode authors or ETH Zürich. Based on <a href="https://github.com/maria-korosteleva/GarmentCode" target="_blank" rel="noopener">GarmentCode</a> (MIT).</p>
+        <div class="toolrow">
+          <select id="profile-select" class="grow" aria-label="Saved body profiles"><option value="">Saved profiles…</option></select>
+          <button class="btn ghost" id="btn-profile-save">Save profile</button>
+        </div>
+        <div id="body-params" class="params"></div>
+        <p class="note">The mannequin is an approximate morph of GarmentCode's base bodies. It isn't a statistical body model, so extreme values may look stylised.</p>
+      </section>
+
+      <!-- FABRIC -->
+      <section class="page" data-page="fabric">
+        <div class="page-head">
+          <h2>Fabric</h2>
+          <p class="muted">How the cloth behaves and looks.</p>
+        </div>
+        <div class="fabric-grid" id="fabric-presets"></div>
+        <label class="field"><span>Colour</span>
+          <div class="swatches" id="swatches"></div></label>
+        <label class="field"><span>Print</span>
+          <select id="print-select">
+            <option value="plain">Plain weave</option>
+            <option value="twill">Twill</option>
+            <option value="stripes">Stripes</option>
+            <option value="gingham">Gingham</option>
+            <option value="dots">Polka dots</option>
+          </select></label>
+        <details class="adv">
+          <summary>Simulation settings</summary>
+          <label class="field"><span>Stiffness <b id="bend-val"></b></span><input id="bend" type="range" min="0" max="1" step="0.01" value="0.5"></label>
+          <label class="field"><span>Stretch <b id="stretch-val"></b></span><input id="stretch" type="range" min="0" max="1" step="0.01" value="0.1"></label>
+          <label class="field"><span>Friction <b id="fric-val"></b></span><input id="fric" type="range" min="0" max="1" step="0.01" value="0.5"></label>
+          <label class="field"><span>Mesh resolution <b id="res-val"></b></span><input id="res" type="range" min="1.2" max="4" step="0.1" value="2"></label>
+          <label class="check"><input id="release-attach" type="checkbox"> Release waist/neck attachments after 400 frames (as GarmentCode's simulator does)</label>
+        </details>
+      </section>
+
+      <!-- CUTTING -->
+      <section class="page" data-page="cut">
+        <div class="page-head">
+          <h2>Cutting layout</h2>
+          <p class="muted">Pattern pieces with seam allowance, arranged on your fabric.</p>
+        </div>
+        <div class="grid2">
+          <label class="field"><span>Fabric width</span>
+            <select id="fabric-width">
+              <option value="90">90 cm (36″)</option>
+              <option value="115">115 cm (45″)</option>
+              <option value="140">140 cm (55″)</option>
+              <option value="150" selected>150 cm (60″)</option>
+            </select></label>
+          <label class="field"><span>Seam allowance</span>
+            <select id="seam-allowance">
+              <option value="0">None</option>
+              <option value="0.6">0.6 cm (¼″)</option>
+              <option value="1">1 cm (⅜″)</option>
+              <option value="1.5" selected>1.5 cm (⅝″)</option>
+            </select></label>
+        </div>
+        <label class="check"><input id="allow-rotate" type="checkbox" checked> Allow 180° rotation (fabric without nap or one-way print)</label>
+        <label class="check"><input id="show-sewline" type="checkbox" checked> Show sewing lines and notches</label>
+        <div class="toolrow"><button class="btn" id="btn-autolayout">Auto-arrange</button><span class="muted small">Drag pieces to adjust. Tap a piece to rotate it.</span></div>
+        <div class="summary" id="cut-summary"></div>
+        <details class="adv" open>
+          <summary>Sewing order</summary>
+          <ol class="steps" id="sew-steps"></ol>
+        </details>
+      </section>
+
+      <footer class="panel-foot">
+        Not affiliated with or endorsed by the GarmentCode authors or ETH Zürich. Built on
+        <a href="https://github.com/maria-korosteleva/GarmentCode" target="_blank" rel="noopener">GarmentCode</a> (MIT).
+        <a href="https://github.com/sh1ftmaker/GarmentCode" target="_blank" rel="noopener">Source</a>
       </footer>
     </aside>
 
-    <main id="viewport">
-      <canvas id="three"></canvas>
-      <div class="toolbar">
-        <button id="btn-drape" class="btn">▶ Drape</button>
-        <button id="btn-flat" class="btn">Show flat panels</button>
-        <button id="btn-pattern" class="btn">2D pattern</button>
+    <main class="stage" id="stage">
+      <canvas id="three" aria-label="3D view of the garment"></canvas>
+      <div id="layout-view" class="layout-view" hidden></div>
+      <div class="viewbar" id="viewbar">
+        <button class="chip" id="btn-drape" title="Run / pause the drape">▶ Drape</button>
+        <button class="chip" id="btn-flat" title="Show panels flat as GarmentCode places them">Flat</button>
+        <button class="chip toggle" id="btn-fit" title="Colour by fit: tight / ease">Fit map</button>
+        <button class="chip toggle on" id="btn-body" title="Show mannequin">Body</button>
+        <button class="chip toggle" id="btn-pattern" title="2D sewing pattern">Pattern</button>
+        <button class="chip" id="btn-camera" title="Reset camera" aria-label="Reset camera"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/></svg></button>
+      </div>
+      <div class="legend" id="fit-legend" hidden>
+        <span>Loose</span><i class="bar"></i><span>Tight</span>
       </div>
       <div id="status" class="status"><span class="spinner"></span><span id="status-text">Starting…</span></div>
       <div id="sim-bar" class="sim-bar" hidden><div></div></div>
+      <div id="warn" class="toast warn" hidden></div>
+      <div id="toast" class="toast" hidden></div>
       <div id="pattern-card" class="pattern-card" hidden>
-        <div class="pattern-head"><b>Sewing pattern</b><button id="pattern-close" class="icon-btn" aria-label="Close">✕</button></div>
-        <div id="pattern-svg"></div>
+        <div class="card-head"><b>Sewing pattern</b><button id="pattern-close" class="icon-btn" aria-label="Close">✕</button></div>
+        <div id="pattern-svg" class="pattern-svg"></div>
       </div>
-      <div id="warn" class="warn" hidden></div>
     </main>
   </div>
+
+  <dialog id="dlg-saves" class="dialog">
+    <div class="card-head"><h3>My designs</h3><button class="icon-btn" data-close aria-label="Close">✕</button></div>
+    <div class="toolrow"><input id="save-name" class="grow" placeholder="Name this design"><button class="btn primary" id="btn-save">Save current</button></div>
+    <div class="saves" id="saves-list"></div>
+  </dialog>
+
+  <dialog id="dlg-about" class="dialog">
+    <div class="card-head"><h3>About this studio</h3><button class="icon-btn" data-close aria-label="Close">✕</button></div>
+    <div class="about">
+      <p><b>GarmentCode 3D Studio</b> is an unofficial, community-built web front-end for
+        <a href="https://github.com/maria-korosteleva/GarmentCode" target="_blank" rel="noopener">GarmentCode</a>,
+        the parametric sewing-pattern system by Maria Korosteleva and Olga Sorkine-Hornung (ETH Zürich).
+        <b>It is not affiliated with or endorsed by the GarmentCode authors.</b></p>
+      <ul>
+        <li><b>Patterns</b> are drafted by GarmentCode's original Python code, running in your browser through Pyodide.</li>
+        <li><b>The mannequin</b> is a measurement-driven morph of GarmentCode's base bodies.</li>
+        <li><b>The drape</b> is a lightweight real-time cloth simulation modelled on GarmentCode's simulation setup. It isn't the NVIDIA Warp simulator used for the GarmentCodeData dataset, and it has no cloth self-collision.</li>
+        <li><b>Nothing leaves your device.</b> Designs are saved in your browser.</li>
+      </ul>
+      <p class="muted small">If you use GarmentCode in research, please cite the original papers (see the repository README).</p>
+    </div>
+  </dialog>
+
   <script type="module" src="src/main.js"></script>
 </body>
 </html>

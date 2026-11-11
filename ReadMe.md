@@ -6,26 +6,54 @@
 
 **Live demo: https://sh1ftmaker.github.io/GarmentCode/**
 
-This fork adds a static, browser-only 3D configurator (in [`web/`](web/)) hosted on GitHub Pages. No server needed:
+This fork adds **GarmentCode 3D Studio**, a static, browser-only web app (in [`web/`](web/)) hosted on GitHub Pages. No server is needed, and nothing leaves your device.
 
-* **Real GarmentCode in the browser.** The original Python code (`pygarment` + `assets/garment_programs`) runs unchanged in [Pyodide](https://pyodide.org/) inside a Web Worker. The parameter UI is built from `assets/design_params/default.yaml`.
-* **three.js 3D view.** Each panel is triangulated, placed in its 3D position from the pattern, and sewn together around the mannequin by a small XPBD cloth solver (seam constraints + collisions against a precomputed body signed distance field).
-* **2D pattern view** using GarmentCode's own SVG export.
-* **Downloads:** pattern specification JSON, SVG, design and body YAML, and the draped garment as OBJ. You can also load design `.yaml` files (e.g. ones saved from the original configurator).
+**Design**
+* The original GarmentCode Python (`pygarment` + `assets/garment_programs`) runs unchanged in [Pyodide](https://pyodide.org/) inside a Web Worker.
+* Starter templates, plain-language parameter names, an Essentials/All switch, search, and "Surprise me" randomisation with per-parameter locks.
+* Undo/redo, share links (the design is compressed into the URL), saved designs with thumbnails, and autosave, all stored in your browser.
+
+**Body**
+* Enter GarmentCode's 26 body measurements (cm or inches). The pattern is re-drafted to fit, and the mannequin morphs to match: height, landmark lines, bust/underbust/waist/hip girths, shoulders, arms and thighs, blended with GarmentCode's body segmentation.
+* Saved body profiles. YAML import and export compatible with GarmentCode.
+
+**3D drape** ([three.js](https://threejs.org/))
+* A small XPBD cloth solver modelled on GarmentCode's simulation setup:
+  * stitched vertices are welded, as in GarmentCode's BoxMesh;
+  * gentle half-space attachments at the waist, the top of strapless garments and the neckline;
+  * skirts and pants don't collide with the arms;
+  * zero gravity for the first frames, a velocity clamp, and the drape stops once the cloth settles.
+* To start close to the body, panels are pre-wrapped around the torso or arm axis before sewing.
+* Fabric presets (cotton, jersey, linen, denim, silk, chiffon), colours and prints.
+* A fit map showing tight and loose areas.
+
+**Cutting**
+* Pattern pieces with seam allowance, notches, seam numbers and grainlines.
+* Automatic layout on your fabric width; drag to adjust, tap to rotate.
+* Fabric to buy, and a generated sewing order.
+* Exports:
+  * printable tiled PDF on A4 or US Letter, with a test square and an assembly map;
+  * full-size layout PDF;
+  * SVG and DXF;
+  * GarmentCode's own pattern SVG and JSON;
+  * the draped garment as GLB or OBJ;
+  * a turntable video and a screenshot.
+
+It installs as an app (PWA) and caches itself for offline use after the first visit.
 
 ### Limitations
 
-The drape is a lightweight real-time approximation. It is **not** the NVIDIA Warp simulator used by GarmentCode/GarmentCodeData: there is no cloth self-collision, and material behaviour is simplified. Changing body measurements updates the sewing pattern, but the mannequin is one of three fixed presets (neutral / female / male) and does not morph. Use the original pipeline for research-quality simulation.
+The drape is a lightweight real-time approximation, **not** the NVIDIA Warp simulator used by GarmentCode/GarmentCodeData. There is no cloth self-collision (layered pieces can overlap), and fabric behaviour is simplified. Some designs, especially strapless and close-fitting tops, may settle lower than intended. The mannequin morph is an approximate regional deformation, not a statistical body model. Extreme measurements will look stylised, and the morph doesn't model posture or body shape beyond the listed measurements. Use the original pipeline for research-quality results.
 
 ### Run locally
 
 ```bash
-cd web && npm install          # three + three-mesh-bvh, only used to precompute body data
-npm run build                  # assembles ../_site (Python sources zip, body meshes, SDFs)
+cd web && npm install          # three + three-mesh-bvh, used to precompute body data
+npm run build                  # assembles ../_site (Python sources zip, body meshes, collision fields)
 npm run serve                  # http://localhost:8000
 ```
 
-Deployment happens through [`.github/workflows/pages.yml`](.github/workflows/pages.yml) on every push to `main`. Set the repository's Pages source to "GitHub Actions".
+Deployment happens through [`.github/workflows/pages.yml`](.github/workflows/pages.yml) on every push to `main`. The repository's Pages source must be set to "GitHub Actions".
 
 ### What's changed vs. upstream
 

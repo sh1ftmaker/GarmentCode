@@ -100,6 +100,45 @@ class WebGarment:
     def set_body_param(self, key, value):
         self.body.load_from_dict({key: float(value)})
 
+    def set_design(self, design_json):
+        _nested_sync(json.loads(design_json), self.design)
+        self.sync_left()
+
+    def set_body_params(self, params_json):
+        self.body.load_from_dict({k: float(v) for k, v in json.loads(params_json).items()})
+
+    def preset_body(self, name):
+        return json.dumps({k: float(v) for k, v in BodyParameters(BODIES[name]).params.items()
+                           if isinstance(v, (int, float)) and not k.startswith('_')})
+
+    def default_design_json(self):
+        return json.dumps(self.initial)
+
+    def randomize_locked(self, locked_json):
+        locked = json.loads(locked_json)
+        keep = {}
+        for path in locked:
+            node = self.design
+            try:
+                for k in path:
+                    node = node[k]
+                keep[tuple(path)] = deepcopy(node['v'])
+            except (KeyError, TypeError):
+                pass
+        self.randomize()
+        for path, v in keep.items():
+            node = self.design
+            for k in path:
+                node = node[k]
+            node['v'] = v
+        self.sync_left()
+
+    def pieces(self, res=0.5):
+        """Fine outline of every panel for the cutting layout (no regeneration)."""
+        if self.pattern is None:
+            return json.dumps({'panels': [], 'stitches': []})
+        return json.dumps(self._export(res))
+
     def randomize(self):
         for _ in range(20):  # avoid all-empty designs
             new = self.sampler.randomize()

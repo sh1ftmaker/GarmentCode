@@ -1,0 +1,10 @@
+{
+  "name": "GarmentCode 3D Studio (unofficial)",
+  "short_name": "GC Studio",
+  "description": "Design parametric sewing patterns, fit them to your measurements, drape in 3D and print for cutting.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f5f1ea",
+  "theme_color": "#f5f1ea",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

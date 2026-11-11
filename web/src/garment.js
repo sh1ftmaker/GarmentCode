@@ -115,49 +115,76 @@ export class SDF {
 // around the body's vertical axis (a cylinder fitted to each panel), and the merged
 // mesh is then projected out of the body.
 
-const AXIS = [0, 1];            // body axis (x, z) in cm
+const BODY_AXIS = { c: [0, 0, 1], a: [0, 1, 0] };   // vertical axis through the torso (cm)
 const ARM = 0, LEG = 1, BODY = 2;
 
 function panelKind(label) { return label === 'leg' ? LEG : label === 'body' ? BODY : ARM; }
 
-/** Bend a placed flat panel around the vertical body axis (in place). */
-function wrapPanel(P, n0) {
-  // horizontal panel normal, oriented away from the axis
-  let nx = n0[0], nz = n0[2];
-  const nl = Math.hypot(nx, nz);
-  if (nl < 0.7) return;                 // panel not roughly vertical (e.g. horizontal pieces)
-  nx /= nl; nz /= nl;
+/**
+ * Bend a placed flat panel around an axis (in place). Each slice along the axis gets
+ * its own radius so the slice reaches roughly a quarter turn: tops become cylinders,
+ * skirts cones, sleeves tubes around the arm.
+ */
+function wrapPanel(P, n0, axis, rMin = 9) {
+  const [cx, cy, cz] = axis.c, [ax, ay, az] = axis.a;
+  // panel normal made perpendicular to the axis, oriented away from it
+  const na = n0[0] * ax + n0[1] * ay + n0[2] * az;
+  let nx = n0[0] - na * ax, ny = n0[1] - na * ay, nz = n0[2] - na * az;
+  const nl = Math.hypot(nx, ny, nz);
+  if (nl < 0.7) return false;           // panel not facing the axis (e.g. horizontal pieces)
+  nx /= nl; ny /= nl; nz /= nl;
   const cnt = P.length / 3;
+  const t = new Float32Array(cnt), u = new Float32Array(cnt), d = new Float32Array(cnt);
   let dMean = 0;
-  for (let i = 0; i < cnt; i++) dMean += (P[3 * i] - AXIS[0]) * nx + (P[3 * i + 2] - AXIS[1]) * nz;
+  for (let i = 0; i < cnt; i++) {
+    const rx = P[3 * i] - cx, ry = P[3 * i + 1] - cy, rz = P[3 * i + 2] - cz;
+    t[i] = rx * ax + ry * ay + rz * az;
+    d[i] = rx * nx + ry * ny + rz * nz;
+    dMean += d[i];
+  }
   dMean /= cnt;
-  if (dMean < 0) { nx = -nx; nz = -nz; dMean = -dMean; }
-  if (dMean < 4) return;
-  const tx = nz, tz = -nx;              // horizontal tangent (d/dtheta direction)
-  let w = 0, uMin = Infinity, uMax = -Infinity;
-  const u = new Float32Array(cnt), d = new Float32Array(cnt);
+  if (dMean < 0) { nx = -nx; ny = -ny; nz = -nz; dMean = -dMean; for (let i = 0; i < cnt; i++) d[i] = -d[i]; }
+  if (dMean < 3) return false;
+  // tangent = a x n
+  const tx = ay * nz - az * ny, ty = az * nx - ax * nz, tz = ax * ny - ay * nx;
+  let uMin = Infinity, uMax = -Infinity, tMin = Infinity, tMax = -Infinity;
   for (let i = 0; i < cnt; i++) {
-    const rx = P[3 * i] - AXIS[0], rz = P[3 * i + 2] - AXIS[1];
-    u[i] = rx * tx + rz * tz; d[i] = rx * nx + rz * nz;
-    w = Math.max(w, Math.abs(u[i]));
+    const rx = P[3 * i] - cx, ry = P[3 * i + 1] - cy, rz = P[3 * i + 2] - cz;
+    u[i] = rx * tx + ry * ty + rz * tz;
     uMin = Math.min(uMin, u[i]); uMax = Math.max(uMax, u[i]);
+    tMin = Math.min(tMin, t[i]); tMax = Math.max(tMax, t[i]);
   }
-  // only wrap panels that face the body (e.g. not collar pieces placed off to the side)
+  // only wrap panels that face the axis (e.g. not collar pieces placed off to the side)
   const uc = (uMin + uMax) / 2;
-  if (Math.abs(uc) > dMean * 0.8 || uMin > dMean || uMax < -dMean) return;
-  // radius that lets the panel reach roughly to the side of the body, never further out than it was
-  const r = Math.max(9, Math.min(dMean, (w * 2) / Math.PI * 1.05));
-  const th0 = Math.atan2(nx, nz);
-  for (let i = 0; i < cnt; i++) {
-    const rr = r + (d[i] - dMean);
-    const th = th0 + u[i] / r;
-    P[3 * i] = AXIS[0] + rr * Math.sin(th);
-    P[3 * i + 2] = AXIS[1] + rr * Math.cos(th);
+  if (Math.abs(uc) > Math.max(dMean, 12) * 0.9 || uMin > dMean + 5 || uMax < -dMean - 5) return false;
+  // per-slice half-width -> radius
+  const BIN = 2, nb = Math.max(1, Math.ceil((tMax - tMin) / BIN) + 1);
+  const wb = new Float32Array(nb);
+  for (let i = 0; i < cnt; i++) { const k = Math.min(nb - 1, Math.floor((t[i] - tMin) / BIN)); wb[k] = Math.max(wb[k], Math.abs(u[i])); }
+  const rb = new Float32Array(nb);
+  for (let k = 0; k < nb; k++) {
+    let w = wb[k];
+    for (let j = Math.max(0, k - 1); j <= Math.min(nb - 1, k + 1); j++) w = Math.max(w, wb[j] * 0.95);
+    rb[k] = Math.max(rMin, (w * 2) / Math.PI * 1.05);
   }
+  const radius = (ti) => {
+    const f = Math.max(0, Math.min(nb - 1.001, (ti - tMin) / BIN - 0.5)), k = Math.floor(f), q = f - k;
+    return rb[k] * (1 - q) + rb[Math.min(nb - 1, k + 1)] * q;
+  };
+  for (let i = 0; i < cnt; i++) {
+    const r = radius(t[i]);
+    const rr = r + (d[i] - dMean);
+    const th = u[i] / r;
+    const cs = Math.cos(th), sn = Math.sin(th);
+    P[3 * i] = cx + t[i] * ax + rr * (cs * nx + sn * tx);
+    P[3 * i + 1] = cy + t[i] * ay + rr * (cs * ny + sn * ty);
+    P[3 * i + 2] = cz + t[i] * az + rr * (cs * nz + sn * tz);
+  }
+  return true;
 }
 
 /** Build the simulation-ready garment from the exported GarmentCode pattern. */
-export function buildGarment(pattern, h, sdf) {
+export function buildGarment(pattern, h, sdf, { armAxes = null } = {}) {
   // 1. mesh + place every panel
   const panels = pattern.panels.map((p, pi) => {
     const { pts, tris } = meshPanel(p.boundary, h);
@@ -170,7 +197,13 @@ export function buildGarment(pattern, h, sdf) {
     });
     const flat = new Float32Array(P);
     const kind = panelKind(p.label);
-    if (kind !== ARM) wrapPanel(P, [R[0][2], R[1][2], R[2][2]]);
+    const n0 = [R[0][2], R[1][2], R[2][2]];
+    if (kind !== ARM) wrapPanel(P, n0, BODY_AXIS);
+    else if (armAxes) {   // sleeves: wrap around the arm on the panel's side
+      let mx = 0; for (let i = 0; i < P.length; i += 3) mx += P[i];
+      const ax = mx >= 0 ? armAxes.pos : armAxes.neg;
+      if (ax) wrapPanel(P, n0, ax, 3.5);
+    }
     return { p, pi, pts, tris, P, flat, kind };
   });
   const offsets = {};
@@ -233,6 +266,16 @@ export function buildGarment(pattern, h, sdf) {
     }
   }
 
+  // seam lines for rendering: panel boundary edges whose both ends are shared (sewn) vertices
+  const seamLines = [];
+  for (const q of panels) {
+    const n = q.p.boundary.length;
+    for (let i = 0; i < n; i++) {
+      const a = remap[q.base + i], b = remap[q.base + (i + 1) % n];
+      if (a !== b && seamVert[a] && seamVert[b]) seamLines.push(a, b);
+    }
+  }
+
   // 4. attachments (GarmentCode's Warp setup, inequality constraints)
   const attach = [], attachY = [], collar = [], collarX = [];
   const levels = pattern.attach_levels || {};
@@ -253,7 +296,7 @@ export function buildGarment(pattern, h, sdf) {
 
   const g = {
     nv,
-    positions, flat, uvs, panelOf, kind,
+    positions, flat, uvs, panelOf, kind, seamLines: new Uint32Array(seamLines),
     index: nv > 65535 ? new Uint32Array(index) : new Uint16Array(index),
     armpitY: (levels.strapless_top || 130) - 2,
     stretch: new Uint32Array(stretch), stretchRest: new Float32Array(stretchRest),
@@ -295,7 +338,7 @@ export class ClothSim {
     this.v = new Float32Array(g.nv * 3);
     this.opts = Object.assign({
       substeps: 12, stretchIters: 2, gravity: 981, thickness: 0.6, friction: 0.5,
-      bendCompliance: 2e-6, damping: 0.8,
+      bendCompliance: 2e-6, stretchCompliance: 0, damping: 0.8,
       zeroGravityFrames: 10,                       // as in GarmentCode's sim config
       relaxFrames: 30,                             // momentum-free settling of the sewn start state
       maxVelocity: 250,                            // cm/s clamp (GarmentCode: global_max_velocity)
@@ -339,6 +382,7 @@ export class ClothSim {
     const dt = frameDt / o.substeps;
     const x = this.x, p = this.p, v = this.v, sdf = this.sdf, grad = this._g;
     const bendAlpha = o.bendCompliance / (dt * dt);
+    const stretchAlpha = o.stretchCompliance / (dt * dt);
     const gy = this.frame < Math.max(o.zeroGravityFrames, o.relaxFrames) ? 0 : -o.gravity * dt;
     const damp = Math.max(0, 1 - o.damping * dt);
     for (let sub = 0; sub < o.substeps; sub++) {
@@ -348,7 +392,7 @@ export class ClothSim {
         v[i] *= damp; v[i + 1] = v[i + 1] * damp + gy; v[i + 2] *= damp;
         x[i] += v[i] * dt; x[i + 1] += v[i + 1] * dt; x[i + 2] += v[i + 2] * dt;
       }
-      for (let k = 0; k < o.stretchIters; k++) this._solveDist(g.stretch, g.stretchRest, 0);
+      for (let k = 0; k < o.stretchIters; k++) this._solveDist(g.stretch, g.stretchRest, stretchAlpha);
       this._solveDist(g.bend, g.bendRest, bendAlpha);
 
       if (this.t < this.attachEnd) {
@@ -398,6 +442,28 @@ export class ClothSim {
       if (Math.sqrt(vmax) < o.settleSpeed) this.settled = true;
     }
     return true;
+  }
+
+  /** Per-vertex fabric strain (1 = relaxed, >1 stretched/tight, <1 compressed), for the fit map. */
+  vertexStrain(out) {
+    const g = this.g, x = this.x, n = g.nv;
+    const sum = new Float32Array(n), cnt = new Uint16Array(n);
+    for (let c = 0; c < g.stretch.length; c += 2) {
+      const a = g.stretch[c], b = g.stretch[c + 1];
+      const l = Math.hypot(x[3 * a] - x[3 * b], x[3 * a + 1] - x[3 * b + 1], x[3 * a + 2] - x[3 * b + 2]) / (g.stretchRest[c >> 1] || 1);
+      sum[a] += l; sum[b] += l; cnt[a]++; cnt[b]++;
+    }
+    out = out || new Float32Array(n);
+    for (let v = 0; v < n; v++) out[v] = cnt[v] ? sum[v] / cnt[v] : 1;
+    return out;
+  }
+
+  /** Distance of every vertex to the body (cm): small = snug, large = loose. */
+  vertexEase(out) {
+    const x = this.x, n = this.g.nv;
+    out = out || new Float32Array(n);
+    for (let v = 0; v < n; v++) out[v] = this.sdf.sample(x[3 * v], x[3 * v + 1], x[3 * v + 2]);
+    return out;
   }
 
   topY() { let m = -Infinity; for (let i = 1; i < this.x.length; i += 3) m = Math.max(m, this.x[i]); return m; }
