@@ -126,7 +126,7 @@ function buildMesh(pattern) {
   sim = null;
   if (!pattern.panels.length) return;
   const h = +$('#res').value;
-  const g = buildGarment(pattern, h);
+  const g = buildGarment(pattern, h, sdf);
   const geom = new THREE.BufferGeometry();
   geom.setAttribute('position', new THREE.BufferAttribute(g.positions, 3).setUsage(THREE.DynamicDrawUsage));
   geom.setAttribute('uv', new THREE.BufferAttribute(g.uvs, 2));
@@ -467,6 +467,7 @@ $('#btn-drape').onclick = () => {
 $('#btn-flat').onclick = () => {
   if (!sim) return;
   sim.reset();
+  sim.x.set(sim.g.flat);   // panels as GarmentCode places them, before wrapping and sewing
   flatMode = true;
   garmentMesh.geometry.attributes.position.needsUpdate = true;
   garmentMesh.geometry.computeVertexNormals();
