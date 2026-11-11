@@ -152,6 +152,7 @@ function simOpts() {
   return {
     bendCompliance: 2e-4 * Math.pow(10, -4 * b),
     friction: +$('#fric').value,
+    releaseAttachments: $('#release-attach').checked,
   };
 }
 
@@ -487,6 +488,7 @@ label('#fric', v => v.toFixed(2));
 $('#res').onchange = () => lastPattern && regenerate();
 $('#bend').onchange = () => { if (lastPattern) { buildMesh(lastPattern); setStatus('Draping…', true); } };
 $('#fric').onchange = () => { if (lastPattern) { buildMesh(lastPattern); setStatus('Draping…', true); } };
+$('#release-attach').onchange = () => { if (lastPattern) { buildMesh(lastPattern); setStatus('Draping…', true); } };
 $('#show-body').onchange = (e) => { if (bodyMesh) bodyMesh.visible = e.target.checked; };
 $('#panel-colors').onchange = (e) => {
   garmentMat.vertexColors = e.target.checked;

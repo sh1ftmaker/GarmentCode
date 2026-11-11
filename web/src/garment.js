@@ -130,7 +130,8 @@ export function buildGarment(pattern, h) {
   // Attachments, as in GarmentCode's Warp simulation setup (pygarment/meshgen/garment.py):
   //  * lower_interface -> waist level (vertical), strapless_top -> under-arm level (vertical)
   //  * right_collar / left_collar -> x = -/+ neck_w/2 (horizontal)
-  // They are soft springs and are released after `attachFrames`, like the original.
+  // In the original Warp fork these are *inequality* (half-space) constraints:
+  //   y >= level for lower_interface / strapless_top,  x >= -neck_w/2 (right), x <= neck_w/2 (left).
   const attach = [], attachY = [], collar = [], collarX = [];
   const levels = pattern.attach_levels || {};
   pattern.panels.forEach((p) => {
@@ -138,7 +139,7 @@ export function buildGarment(pattern, h) {
       if (!(label in levels)) continue;
       for (const i of new Set(ids)) {
         const v = offsets[p.name] + i;
-        if (label.endsWith('_collar')) { collar.push(v); collarX.push(levels[label]); }
+        if (label.endsWith('_collar')) { collar.push(v); collarX.push(levels[label]); } // signed: right <0, left >0
         else { attach.push(v); attachY.push(levels[label]); }
       }
     }
@@ -198,8 +199,10 @@ export class ClothSim {
     this.opts = Object.assign({
       substeps: 12, gravity: 981, thickness: 0.35, friction: 0.5,
       bendCompliance: 2e-6, sewTime: 1.4, damping: 1.5,
-      attachStiffness: 0.02, attachFrames: 400,   // original: 400 frames at 60 fps, then released
-      maxDuration: 20, settleSpeed: 1.0,          // stop when max vertex speed (cm/s) is below this
+      // original: ke=1000 in Warp XPBD -> alpha = 1/(ke*dt^2) ~ 360, i.e. ~0.3% correction per substep
+      attachStiffness: 0.003, attachFrames: 400,  // original: 400 frames at 60 fps, then released
+      releaseAttachments: false,
+      maxDuration: 12, settleSpeed: 1.0,          // stop when max vertex speed (cm/s) is below this
     }, opts);
     const s = g.seams;
     this.seamRest0 = new Float32Array(s.length / 2);
@@ -213,10 +216,10 @@ export class ClothSim {
     this._g = [0, 0, 0];
   }
 
-  get attachEnd() { return this.opts.sewTime + this.opts.attachFrames / 60; }
+  get attachEnd() { return this.opts.releaseAttachments ? this.opts.sewTime + this.opts.attachFrames / 60 : Infinity; }
   get attached() { return this.t < this.attachEnd; }
   get done() { return this.settled || this.t >= this.opts.maxDuration; }
-  get progress() { return this.done ? 1 : Math.min(0.99, this.t / (this.attachEnd + 3)); }
+  get progress() { return this.done ? 1 : Math.min(0.99, this.t / Math.min(this.opts.maxDuration, this.attachEnd + 3)); }
 
   reset() {
     this.x.set(this.x0); this.v.fill(0); this.t = 0; this.settled = false; this.releaseY = null;
@@ -271,9 +274,12 @@ export class ClothSim {
       // keep waistbands / strapless tops at their body level (vertical only)
       if (this.t < this.attachEnd) {
         const at = this.g.attach, ay = this.g.attachY, ak = o.attachStiffness;
-        for (let c = 0; c < at.length; c++) { const i = 3 * at[c] + 1; x[i] += (ay[c] - x[i]) * ak; }
+        for (let c = 0; c < at.length; c++) { const i = 3 * at[c] + 1; if (x[i] < ay[c]) x[i] += (ay[c] - x[i]) * ak; }
         const cl = this.g.collar, cx = this.g.collarX;
-        for (let c = 0; c < cl.length; c++) { const i = 3 * cl[c]; x[i] += (cx[c] - x[i]) * ak; }
+        for (let c = 0; c < cl.length; c++) {
+          const i = 3 * cl[c], lim = cx[c];
+          if (lim < 0 ? x[i] < lim : x[i] > lim) x[i] += (lim - x[i]) * ak;
+        }
       } else if (this.releaseY === null) {
         this.releaseY = this.topY();
       }
@@ -293,7 +299,7 @@ export class ClothSim {
       for (let i = 0; i < 3 * n; i++) v[i] = (x[i] - p[i]) * inv;
     }
     // settle detection once attachments are released (the original runs until static too)
-    if (this.t > this.attachEnd + 1) {
+    if (this.t > Math.min(this.attachEnd, this.opts.sewTime * 2) + 1) {
       let vmax = 0;
       for (let i = 0; i < 3 * n; i += 3) vmax = Math.max(vmax, v[i] * v[i] + v[i + 1] * v[i + 1] + v[i + 2] * v[i + 2]);
       if (Math.sqrt(vmax) < o.settleSpeed) this.settled = true;
