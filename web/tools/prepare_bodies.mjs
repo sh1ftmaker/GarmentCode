@@ -1,6 +1,8 @@
 // Converts GarmentCode body OBJs into compact binaries for the web configurator:
 //   body_<name>.bin : [nv u32][nf u32][pos f32 * 3nv (cm)][idx u32 * 3nf]
-//   sdf_<name>.bin  : [min xyz f32][cell f32][nx ny nz u32][dist int16 * nx*ny*nz (mm, signed)]
+//   sdf_<name>.bin  : [min xyz f32][cell f32][nx ny nz u32][dist int16 * N (mm, signed)][armMask u8 * N]
+//   armMask = 1 where the closest body surface belongs to an arm (from ggg_body_segmentation.json),
+//   used to mirror GarmentCode's collision filter (skirt/pants panels ignore the arms).
 // Usage: node tools/prepare_bodies.mjs <repo_root> <out_dir>
 import fs from 'fs';
 import path from 'path';
@@ -13,6 +15,7 @@ const CELL = 1.5;   // cm
 const MARGIN = 12;  // cm
 
 fs.mkdirSync(outDir, { recursive: true });
+const seg = JSON.parse(fs.readFileSync(path.join(repo, 'assets/bodies/ggg_body_segmentation.json'), 'utf8'));
 
 function parseObj(text) {
   const pos = [], idx = [];
@@ -47,6 +50,9 @@ for (const [name, file] of Object.entries(BODIES)) {
   const size = bb.max.clone().addScalar(MARGIN).sub(min);
   const nx = Math.ceil(size.x / CELL) + 1, ny = Math.ceil(size.y / CELL) + 1, nz = Math.ceil(size.z / CELL) + 1;
   const dist = new Int16Array(nx * ny * nz);
+  const armMask = new Uint8Array(nx * ny * nz);
+  const isArmV = new Uint8Array(nv);
+  for (const k of ['left_arm', 'right_arm']) for (const v of seg[k]) isArmV[v] = 1;
 
   const p = new THREE.Vector3();
   const ray = new THREE.Ray();
@@ -58,6 +64,11 @@ for (const [name, file] of Object.entries(BODIES)) {
     p.set(min.x + i * CELL, min.y + j * CELL, min.z + k * CELL);
     bvh.closestPointToPoint(p, target);
     let d = target.distance;
+    // three-mesh-bvh reorders the index buffer, so map the face back through the BVH-ordered index
+    const fi = target.faceIndex;
+    const ia = geom.index.array;
+    const armVotes = isArmV[ia[3 * fi]] + isArmV[ia[3 * fi + 1]] + isArmV[ia[3 * fi + 2]];
+    armMask[i + nx * (j + ny * k)] = armVotes >= 2 ? 1 : 0;
     if (d < 25) {  // sign only matters near the surface
       let inside = 0;
       for (const dir of dirs) {
@@ -72,6 +83,6 @@ for (const [name, file] of Object.entries(BODIES)) {
   const hf = new Float32Array([min.x, min.y, min.z, CELL]);
   const hu = new Uint32Array([nx, ny, nz]);
   fs.writeFileSync(path.join(outDir, `sdf_${name}.bin`),
-    Buffer.concat([Buffer.from(hf.buffer), Buffer.from(hu.buffer), Buffer.from(dist.buffer)]));
+    Buffer.concat([Buffer.from(hf.buffer), Buffer.from(hu.buffer), Buffer.from(dist.buffer), Buffer.from(armMask.buffer)]));
   console.log(`${name}: ${nv} verts, ${nf} faces, sdf ${nx}x${ny}x${nz} in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 }

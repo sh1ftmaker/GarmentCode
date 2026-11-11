@@ -73,7 +73,11 @@ export class SDF {
     this.min = [f[0], f[1], f[2]];
     this.cell = f[3];
     this.n = [u[0], u[1], u[2]];
-    this.d = new Int16Array(buffer, 28, u[0] * u[1] * u[2]);
+    const N = u[0] * u[1] * u[2];
+    this.d = new Int16Array(buffer, 28, N);
+    // 1 where the closest body surface is an arm (for GarmentCode's skirt/pants arm filter)
+    this.arm = buffer.byteLength >= 28 + 3 * N ? new Uint8Array(buffer, 28 + 2 * N, N) : null;
+    this.lastArm = 0;
   }
   // returns distance (cm); writes gradient to g
   sample(x, y, z, g) {
@@ -84,6 +88,7 @@ export class SDF {
     const tx = fx - i, ty = fy - j, tz = fz - k;
     const d = this.d, sx = 1, sy = nx, sz = nx * ny;
     const o = i + sy * j + sz * k;
+    this.lastArm = this.arm ? this.arm[o + (tx > 0.5 ? sx : 0) + (ty > 0.5 ? sy : 0) + (tz > 0.5 ? sz : 0)] : 0;
     const c000 = d[o], c100 = d[o + sx], c010 = d[o + sy], c110 = d[o + sx + sy];
     const c001 = d[o + sz], c101 = d[o + sx + sz], c011 = d[o + sy + sz], c111 = d[o + sx + sy + sz];
     const c00 = c000 + (c100 - c000) * tx, c10 = c010 + (c110 - c010) * tx;
@@ -105,7 +110,7 @@ export class SDF {
 // ---------------------------------------------------------------------------
 /** Build the simulation-ready garment from the exported GarmentCode pattern. */
 export function buildGarment(pattern, h) {
-  const positions = [], uvs = [], index = [], panelOf = [];
+  const positions = [], uvs = [], index = [], panelOf = [], ignoreArms = [];
   const offsets = {};
   const rest2D = [];
   pattern.panels.forEach((p, pi) => {
@@ -121,6 +126,9 @@ export function buildGarment(pattern, h) {
       uvs.push(x / 25, y / 25);
       rest2D.push(x, y);
       panelOf.push(pi);
+      // GarmentCode: lower-garment panels ignore the arms. Torso panels ignore them below the
+      // armpit, so side seams close under the arm (the original starts with seams pre-merged).
+      ignoreArms.push(p.label === 'leg' ? 1 : p.label === 'body' ? 2 : 0);
     }
     for (const t of tris) index.push(base + t);
   });
@@ -179,6 +187,8 @@ export function buildGarment(pattern, h) {
     uvs: new Float32Array(uvs),
     index: nv > 65535 ? new Uint32Array(index) : new Uint16Array(index),
     panelOf: new Uint16Array(panelOf),
+    ignoreArms: new Uint8Array(ignoreArms),
+    armpitY: (pattern.attach_levels && pattern.attach_levels.strapless_top) || 130,
     stretch: new Uint32Array(stretch), stretchRest: restLen(stretch),
     bend: new Uint32Array(bend), bendRest: restLen(bend),
     seams: new Uint32Array(seams),
@@ -284,10 +294,11 @@ export class ClothSim {
         this.releaseY = this.topY();
       }
       // body collision with simple friction
-      const th = o.thickness, fr = o.friction;
+      const th = o.thickness, fr = o.friction, ign = this.g.ignoreArms, armpitY = this.g.armpitY - 2;
       for (let i = 0; i < 3 * n; i += 3) {
         const d = sdf.sample(x[i], x[i + 1], x[i + 2], g);
-        if (d < th) {
+        const ig = ign[i / 3];
+        if (d < th && !(sdf.lastArm && (ig === 1 || (ig === 2 && x[i + 1] < armpitY)))) {
           const push = th - d;
           x[i] += g[0] * push; x[i + 1] += g[1] * push; x[i + 2] += g[2] * push;
           const mx = x[i] - p[i], my = x[i + 1] - p[i + 1], mz = x[i + 2] - p[i + 2];
