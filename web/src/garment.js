@@ -289,7 +289,8 @@ export function buildGarment(pattern, h, sdf, { armAxes = null } = {}) {
         if (seenA.has(key)) continue;
         seenA.add(key);
         if (label.endsWith('_collar')) { collar.push(v); collarX.push(levels[label]); }
-        else { attach.push(v); attachY.push(levels[label]); }
+        // never lift an edge above where GarmentCode placed it (e.g. a skirt hung below a long top)
+        else { attach.push(v); attachY.push(Math.min(levels[label], positions[3 * v + 1] + 2)); }
       }
     }
   }
@@ -309,7 +310,7 @@ export function buildGarment(pattern, h, sdf, { armAxes = null } = {}) {
 }
 
 /** Collision filter, mirroring GarmentCode: lower garments ignore arms; torso below the armpit too. */
-function ignoresArm(kind, y, armpitY) { return kind === LEG || (kind === BODY && y < armpitY); }
+function ignoresArm(kind) { return kind === LEG; }
 
 function projectOut(g, sdf, margin, iters) {
   const x = g.positions, grad = [0, 0, 0];
@@ -336,14 +337,16 @@ export class ClothSim {
     this.x0 = new Float32Array(g.positions);      // sewn start state
     this.p = new Float32Array(g.nv * 3);
     this.v = new Float32Array(g.nv * 3);
+    this.cn = new Float32Array(g.nv * 3);     // last contact normal per vertex
+    this.cpush = new Float32Array(g.nv);      // last contact correction depth (0 = no contact)
     this.opts = Object.assign({
       substeps: 12, stretchIters: 2, gravity: 981, thickness: 0.6, friction: 0.5,
       bendCompliance: 2e-6, stretchCompliance: 0, damping: 0.8,
       zeroGravityFrames: 10,                       // as in GarmentCode's sim config
       relaxFrames: 30,                             // momentum-free settling of the sewn start state
       maxVelocity: 250,                            // cm/s clamp (GarmentCode: global_max_velocity)
-      attachStiffness: 0.004, attachFrames: 400, releaseAttachments: false,
-      maxDuration: 14, settleSpeed: 2.0, minDuration: 2.0,
+      attachStiffness: 0.06, attachFrames: 400, releaseAttachments: false,   // one-sided: only ever lifts
+      maxDuration: 14, settleSpeed: 2.0, minDuration: 2.0, frictionScale: 1,
     }, opts);
     this.reset();
     this._g = [0, 0, 0];
@@ -351,6 +354,7 @@ export class ClothSim {
 
   reset() {
     this.x.set(this.x0); this.v.fill(0);
+    if (this.cpush) this.cpush.fill(0);
     this.t = 0; this.frame = 0; this.settled = false; this.releaseY = null;
   }
 
@@ -387,9 +391,25 @@ export class ClothSim {
     const damp = Math.max(0, 1 - o.damping * dt);
     for (let sub = 0; sub < o.substeps; sub++) {
       this.t += dt;
-      for (let i = 0; i < 3 * n; i += 3) {
+      // velocity-level Coulomb friction for vertices that touched the body last substep:
+      // it resists sliding (incl. gravity) without fighting the position constraints
+      const muV = this.frame < o.relaxFrames + 20 ? 0 : o.friction * o.frictionScale;
+      const cn = this.cn, cp = this.cpush, invDt = 1 / dt;
+      for (let i = 0, vi = 0; i < 3 * n; i += 3, vi++) {
         p[i] = x[i]; p[i + 1] = x[i + 1]; p[i + 2] = x[i + 2];
         v[i] *= damp; v[i + 1] = v[i + 1] * damp + gy; v[i + 2] *= damp;
+        if (muV > 0 && cp[vi] > 0) {
+          const nx = cn[i], ny = cn[i + 1], nz = cn[i + 2];
+          let vn = v[i] * nx + v[i + 1] * ny + v[i + 2] * nz;
+          const tx = v[i] - vn * nx, ty = v[i + 1] - vn * ny, tz = v[i + 2] - vn * nz;
+          const vt = Math.sqrt(tx * tx + ty * ty + tz * tz);
+          // normal "impulse": what the body pushed back last substep, plus pressing velocity
+          const jn = cp[vi] * invDt + Math.max(0, -vn);
+          const lim = muV * jn;
+          const kk = vt <= lim ? 0 : 1 - lim / vt;
+          if (vn < 0) vn = 0;   // don't keep pressing into the body
+          v[i] = vn * nx + tx * kk; v[i + 1] = vn * ny + ty * kk; v[i + 2] = vn * nz + tz * kk;
+        }
         x[i] += v[i] * dt; x[i + 1] += v[i + 1] * dt; x[i + 2] += v[i + 2] * dt;
       }
       for (let k = 0; k < o.stretchIters; k++) this._solveDist(g.stretch, g.stretchRest, stretchAlpha);
@@ -408,22 +428,17 @@ export class ClothSim {
         this.releaseY = this.topY();
       }
 
-      // body collision + friction (static if the tangential slip is small vs. the normal push)
-      const th = o.thickness, mu = o.friction;
+      // body collision (projection only; friction is applied to velocities above)
+      const th = o.thickness;
       for (let vi = 0; vi < n; vi++) {
         const i = 3 * vi;
         const d = sdf.sample(x[i], x[i + 1], x[i + 2], grad);
-        if (d >= th) continue;
-        if (sdf.lastArm && ignoresArm(g.kind[vi], x[i + 1], g.armpitY)) continue;
+        if (d >= th + 0.3 || (sdf.lastArm && ignoresArm(g.kind[vi], x[i + 1], g.armpitY))) { cp[vi] = 0; continue; }
+        cn[i] = grad[0]; cn[i + 1] = grad[1]; cn[i + 2] = grad[2];
+        if (d >= th) { cp[vi] = 1e-4; continue; }     // resting just on the surface: still in contact
         const push = th - d;
+        cp[vi] = push;
         x[i] += grad[0] * push; x[i + 1] += grad[1] * push; x[i + 2] += grad[2] * push;
-        const mx = x[i] - p[i], my = x[i + 1] - p[i + 1], mz = x[i + 2] - p[i + 2];
-        const mn = mx * grad[0] + my * grad[1] + mz * grad[2];
-        const tx = mx - mn * grad[0], ty = my - mn * grad[1], tz = mz - mn * grad[2];
-        const tl = Math.sqrt(tx * tx + ty * ty + tz * tz);
-        if (tl < 1e-9) continue;
-        const k = tl < mu * push * 4 ? 1 : Math.min(1, (mu * push * 4) / tl + 0.15 * mu);
-        x[i] -= tx * k; x[i + 1] -= ty * k; x[i + 2] -= tz * k;
       }
       const inv = 1 / dt;
       if (this.frame < o.relaxFrames) { v.fill(0); continue; }

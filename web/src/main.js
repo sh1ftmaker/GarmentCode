@@ -848,3 +848,6 @@ $('#export-menu').addEventListener('click', async (e) => {
 
 // offline cache (installable app)
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+
+// debugging handle (used by the automated visual tests)
+window.__gc = { viewer, get sim() { return sim; }, get sdf() { return sdf; } };
