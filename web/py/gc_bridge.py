@@ -201,12 +201,18 @@ class WebGarment:
             total = len(loop)
             for ei, (first, n) in enumerate(ranges):
                 edge_ranges[(pname, ei)] = [(first + i) % total for i in range(n + 1)]
+            labels = {}
+            for ei, e in enumerate(p['edges']):
+                lab = e.get('label')
+                if lab:
+                    labels.setdefault(lab if isinstance(lab, str) else str(lab), []).extend(edge_ranges[(pname, ei)])
             R = np.asarray(euler_xyz_to_R(p['rotation'])).tolist()
             out_panels.append({
                 'name': pname,
                 'label': p.get('label', ''),
                 'boundary': loop,
                 'edge_ranges': [edge_ranges[(pname, ei)] for ei in range(n_edges)],
+                'labels': labels,
                 'rotation': R,
                 'translation': [float(x) for x in p['translation']],
             })
@@ -223,7 +229,16 @@ class WebGarment:
                 ra = ra[::-1]
             out_stitches.append({'a': a[0], 'b': b[0], 'ia': ra, 'ib': rb})
 
-        return {'panels': out_panels, 'stitches': out_stitches}
+        # Attachment levels, as in pygarment.meshgen.garment (GarmentCode's Warp simulation setup)
+        b = self.body.params
+        levels = {
+            'lower_interface': float(b.get('_waist_level', b['height'] - b['head_l'] - b['waist_line'])),
+            'strapless_top': float(b['height'] - b['head_l'] - b['armscye_depth']),
+        }
+        neck_half = float((b['neck_w'] - 2) / 2)
+        levels['right_collar'] = -neck_half   # x target, as in the original setup
+        levels['left_collar'] = neck_half
+        return {'panels': out_panels, 'stitches': out_stitches, 'attach_levels': levels}
 
     # ---------------- downloads ----------------
     def spec_json(self):

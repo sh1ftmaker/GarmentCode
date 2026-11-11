@@ -126,6 +126,23 @@ export function buildGarment(pattern, h) {
   });
 
   const nv = positions.length / 3;
+  // attachment constraints (vertical), mirroring GarmentCode's simulation setup
+  // Attachments, as in GarmentCode's Warp simulation setup (pygarment/meshgen/garment.py):
+  //  * lower_interface -> waist level (vertical), strapless_top -> under-arm level (vertical)
+  //  * right_collar / left_collar -> x = -/+ neck_w/2 (horizontal)
+  // They are soft springs and are released after `attachFrames`, like the original.
+  const attach = [], attachY = [], collar = [], collarX = [];
+  const levels = pattern.attach_levels || {};
+  pattern.panels.forEach((p) => {
+    for (const [label, ids] of Object.entries(p.labels || {})) {
+      if (!(label in levels)) continue;
+      for (const i of new Set(ids)) {
+        const v = offsets[p.name] + i;
+        if (label.endsWith('_collar')) { collar.push(v); collarX.push(levels[label]); }
+        else { attach.push(v); attachY.push(levels[label]); }
+      }
+    }
+  });
   // stretch edges + bending pairs from triangle adjacency
   const edgeMap = new Map();
   const stretch = [], bend = [];
@@ -164,6 +181,8 @@ export function buildGarment(pattern, h) {
     stretch: new Uint32Array(stretch), stretchRest: restLen(stretch),
     bend: new Uint32Array(bend), bendRest: restLen(bend),
     seams: new Uint32Array(seams),
+    attach: new Uint32Array(attach), attachY: new Float32Array(attachY),
+    collar: new Uint32Array(collar), collarX: new Float32Array(collarX),
   };
 }
 
@@ -178,7 +197,9 @@ export class ClothSim {
     this.v = new Float32Array(g.nv * 3);
     this.opts = Object.assign({
       substeps: 12, gravity: 981, thickness: 0.35, friction: 0.5,
-      bendCompliance: 2e-6, sewTime: 1.4, duration: 7, damping: 1.5,
+      bendCompliance: 2e-6, sewTime: 1.4, damping: 1.5,
+      attachStiffness: 0.02, attachFrames: 400,   // original: 400 frames at 60 fps, then released
+      maxDuration: 20, settleSpeed: 1.0,          // stop when max vertex speed (cm/s) is below this
     }, opts);
     const s = g.seams;
     this.seamRest0 = new Float32Array(s.length / 2);
@@ -187,14 +208,18 @@ export class ClothSim {
       this.seamRest0[i / 2] = Math.hypot(x[a] - x[b], x[a + 1] - x[b + 1], x[a + 2] - x[b + 2]);
     }
     this.t = 0;
+    this.settled = false;
+    this.releaseY = null;   // garment top height when attachments were released
     this._g = [0, 0, 0];
   }
 
-  get done() { return this.t >= this.opts.duration; }
-  get progress() { return Math.min(1, this.t / this.opts.duration); }
+  get attachEnd() { return this.opts.sewTime + this.opts.attachFrames / 60; }
+  get attached() { return this.t < this.attachEnd; }
+  get done() { return this.settled || this.t >= this.opts.maxDuration; }
+  get progress() { return this.done ? 1 : Math.min(0.99, this.t / (this.attachEnd + 3)); }
 
   reset() {
-    this.x.set(this.x0); this.v.fill(0); this.t = 0;
+    this.x.set(this.x0); this.v.fill(0); this.t = 0; this.settled = false; this.releaseY = null;
   }
 
   _solveDist(idx, rest, alpha, scale = 1) {
@@ -243,6 +268,15 @@ export class ClothSim {
       }
       this._solveDist(this.g.stretch, this.g.stretchRest, 0);
       this._solveDist(this.g.bend, this.g.bendRest, bendAlpha);
+      // keep waistbands / strapless tops at their body level (vertical only)
+      if (this.t < this.attachEnd) {
+        const at = this.g.attach, ay = this.g.attachY, ak = o.attachStiffness;
+        for (let c = 0; c < at.length; c++) { const i = 3 * at[c] + 1; x[i] += (ay[c] - x[i]) * ak; }
+        const cl = this.g.collar, cx = this.g.collarX;
+        for (let c = 0; c < cl.length; c++) { const i = 3 * cl[c]; x[i] += (cx[c] - x[i]) * ak; }
+      } else if (this.releaseY === null) {
+        this.releaseY = this.topY();
+      }
       // body collision with simple friction
       const th = o.thickness, fr = o.friction;
       for (let i = 0; i < 3 * n; i += 3) {
@@ -258,6 +292,17 @@ export class ClothSim {
       const inv = 1 / dt;
       for (let i = 0; i < 3 * n; i++) v[i] = (x[i] - p[i]) * inv;
     }
+    // settle detection once attachments are released (the original runs until static too)
+    if (this.t > this.attachEnd + 1) {
+      let vmax = 0;
+      for (let i = 0; i < 3 * n; i += 3) vmax = Math.max(vmax, v[i] * v[i] + v[i + 1] * v[i + 1] + v[i + 2] * v[i + 2]);
+      if (Math.sqrt(vmax) < o.settleSpeed) this.settled = true;
+    }
     return true;
   }
+
+  topY() { let m = -Infinity; for (let i = 1; i < this.x.length; i += 3) m = Math.max(m, this.x[i]); return m; }
+
+  /** How far the garment slid after attachments were released (cm). */
+  slipAfterRelease() { return this.releaseY === null ? 0 : this.releaseY - this.topY(); }
 }

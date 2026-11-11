@@ -35,6 +35,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; }
 body {
   background: var(--bg); color: var(--text);
@@ -150,6 +151,19 @@ a { color: var(--accent); }
   #sidebar.collapsed .tabs, #sidebar.collapsed .tab-pages, #sidebar.collapsed .side-foot { display: none; }
   .brand { padding: 10px 16px 6px; }
   .mobile-only { display: block; }
+  /* whole sheet scrolls, so the footer buttons are reachable */
+  #sidebar { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .tab-pages { flex: none; overflow: visible; }
+  .tabs { position: sticky; top: 0; background: var(--panel); z-index: 3; }
+  .side-foot { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .btn { padding: 10px 14px; }
+  .field input[type=range] { height: 28px; }
+  /* download menu becomes a bottom sheet */
+  .menu { position: static; }
+  .menu-pop { position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); min-width: 0; z-index: 20; }
+  .menu-pop button { padding: 14px 12px; }
+  .pattern-card { left: 8px; right: 8px; width: auto; bottom: 8px; }
+  .pattern-head .icon-btn { font-size: 22px; padding: 6px 12px; }
   #viewport { flex: 1; min-height: 0; }
   .toolbar { left: 12px; right: 12px; top: 10px; justify-content: flex-start; }
   .toolbar .btn { padding: 6px 10px; font-size: 13px; }

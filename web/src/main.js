@@ -175,7 +175,12 @@ function frame() {
     const bar = $('#sim-bar');
     bar.hidden = sim.done;
     bar.firstElementChild.style.width = `${(sim.progress * 100).toFixed(1)}%`;
-    if (sim.done) { setStatus('Draped'); updateDrapeButtons(); }
+    if (sim.attached === false && !sim._announced) { sim._announced = true; if (!sim.done) setStatus('Attachments released, settling…', true); }
+    if (sim.done) {
+      setStatus('Draped'); updateDrapeButtons();
+      const slip = sim.slipAfterRelease();
+      if (slip > 12) showWarn(`This design slid ${slip.toFixed(0)} cm once the waist/neck attachments were released. It probably does not fit this body (GarmentCode's simulator releases them the same way).`);
+    }
   }
   renderer.render(scene, camera);
 }
