@@ -1,3 +1,40 @@
+# GarmentCode 3D — unofficial web configurator (fork)
+
+> [!IMPORTANT]
+> **This is an unofficial, community fork. We are not affiliated with, endorsed by, or supported by the original GarmentCode authors, ETH Zürich, or the Interactive Geometry Lab.**
+> All credit for GarmentCode, PyGarment, the garment programs and the body models goes to the original authors — see the [original repository](https://github.com/maria-korosteleva/GarmentCode) and the [citation](#citation) section below. For the official online demo, go to https://garmentcode.ethz.ch/. Please do not report issues with this fork to the original authors.
+
+**Live demo: https://sh1ftmaker.github.io/GarmentCode/**
+
+This fork adds a static, browser-only 3D configurator (in [`web/`](web/)) hosted on GitHub Pages. No server needed:
+
+* **Real GarmentCode in the browser.** The original Python code (`pygarment` + `assets/garment_programs`) runs unchanged in [Pyodide](https://pyodide.org/) inside a Web Worker. The parameter UI is built from `assets/design_params/default.yaml`.
+* **three.js 3D view.** Each panel is triangulated, placed in its 3D position from the pattern, and sewn together around the mannequin by a small XPBD cloth solver (seam constraints + collisions against a precomputed body signed distance field).
+* **2D pattern view** using GarmentCode's own SVG export.
+* **Downloads:** pattern specification JSON, SVG, design and body YAML, and the draped garment as OBJ. You can also load design `.yaml` files (e.g. ones saved from the original configurator).
+
+### Limitations
+
+The drape is a lightweight real-time approximation. It is **not** the NVIDIA Warp simulator used by GarmentCode/GarmentCodeData: there is no cloth self-collision, and material behaviour is simplified. Changing body measurements updates the sewing pattern, but the mannequin is one of three fixed presets (neutral / female / male) and does not morph. Use the original pipeline for research-quality simulation.
+
+### Run locally
+
+```bash
+cd web && npm install          # three + three-mesh-bvh, only used to precompute body data
+npm run build                  # assembles ../_site (Python sources zip, body meshes, SDFs)
+npm run serve                  # http://localhost:8000
+```
+
+Deployment happens through [`.github/workflows/pages.yml`](.github/workflows/pages.yml) on every push to `main`. Set the repository's Pages source to "GitHub Actions".
+
+### What's changed vs. upstream
+
+Only additions: `web/`, `.github/workflows/pages.yml`, `.gitignore` entries and this README section. The Python library and garment programs are untouched. The web port is distributed under the same MIT license as the original project.
+
+---
+
+*The original README follows.*
+
 # GarmentCode: Programming Parametric Sewing Patterns
 
 ![Examples of garments sampled from GarmentCode configurator](https://github.com/maria-korosteleva/GarmentCode/raw/main/assets/img/header.png)

@@ -1,0 +1,13 @@
+{
+  "name": "garmentcode-3d-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bash tools/build_site.sh",
+    "serve": "python3 -m http.server 8000 --directory ../_site"
+  },
+  "devDependencies": {
+    "three": "0.170.0",
+    "three-mesh-bvh": "0.8.3"
+  }
+}

@@ -31,3 +31,6 @@ output*
 
 # Nicegui
 .nicegui
+# web configurator build
+web/node_modules/
+_site/
