@@ -58,4 +58,18 @@ assert.match(svg, new RegExp(`viewBox="0 0 150 ${len}" width="150cm" height="${l
 const sheet = planSheet(set, { paper: PAPERS.a4, budget: 0 });
 assert.equal(sheet.layout.items.length, set.groups.length, 'pattern sheet: one of each piece');
 assert.match(toDXF(primitives(set, L)), /\$INSUNITS\n70\n4/);
+
+// grain: bias pieces are turned 45° (outline unchanged), mirror pairs keep mirrored grains
+const bias = buildPieces(data, { sa: 0, grain: { all: 'bias', pieces: { wb_front: 'cross' } } });
+const byB = Object.fromEntries(bias.pieces.map(p => [p.id, p])), byS = Object.fromEntries(set.pieces.map(p => [p.id, p]));
+assert.equal(byB.left_ftorso.grainMode, 'bias');
+assert.equal(byB.wb_front.grainMode, 'cross', 'per-piece override');
+assert.ok(Math.abs(Math.abs(byB.left_ftorso.grainVec[0]) - Math.SQRT1_2) < 1e-9, 'bias grain at 45°');
+assert.ok(Math.abs(byB.left_ftorso.grainVec[0] + byB.right_ftorso.grainVec[0]) < 1e-9, 'mirrored bias on a mirrored pair');
+for (const id of Object.keys(byS)) assert.ok(Math.abs(byB[id].area - byS[id].area) < 1e-6, 'rigid turn keeps the area');
+assert.ok(bias.groups.some(g => g.count === 2 && g.mirrored === 1), 'bias pair still a mirrored pair');
+assert.equal(byB.skirt_back.sym, false, 'a bias piece is not cut on the fold');
+const LB = autoLayout(bias, { width: 150, timeBudget: 0 });
+assert.equal(findProblems(bias, LB).size, 0, 'bias layout without overlaps');
+assert.match(toSVG(primitives(bias, LB), 150, 200), /Cut on the bias/);
 console.log('cutting pipeline OK');

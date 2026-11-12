@@ -1,5 +1,5 @@
 // App state snapshots: undo/redo, share links, saved designs, body profiles, autosave.
-// A snapshot is { source, design, base, measurements, fabric }; source is null for
+// A snapshot is { source, design, base, measurements, fabric, grain }; source is null for
 // GarmentCode designs or a FreeSewing design id (then design is that design's option tree).
 
 export class History {
@@ -44,7 +44,10 @@ export function compactSnapshot(snap, defaults) {
   const m = {};
   const bm = defaults.presets[snap.base] || {};
   for (const [k, v] of Object.entries(snap.measurements || {})) if (Math.abs(v - (bm[k] ?? NaN)) > 1e-6 || !(k in bm)) m[k] = Math.round(v * 100) / 100;
-  return { v: 2, ...(snap.source ? { s: snap.source } : {}), d, b: snap.base, m, f: snap.fabric };
+  // grain (v3): { a: garment-wide mode, p: { piece: mode } }, only when not all straight
+  const gr = snap.grain || {}, gp = Object.fromEntries(Object.entries(gr.pieces || {}).filter(([, v]) => v));
+  const g = (gr.all && gr.all !== 'straight') || Object.keys(gp).length ? { ...(gr.all && gr.all !== 'straight' ? { a: gr.all } : {}), ...(Object.keys(gp).length ? { p: gp } : {}) } : null;
+  return { v: 3, ...(snap.source ? { s: snap.source } : {}), d, b: snap.base, m, f: snap.fabric, ...(g ? { g } : {}) };
 }
 export function expandSnapshot(c, defaults) {
   const source = c.s && defaults.isFS?.(c.s) ? c.s : null;   // older links have no source: GarmentCode
@@ -55,6 +58,8 @@ export function expandSnapshot(c, defaults) {
     measurements: { ...(defaults.presets[c.b || 'neutral'] || {}), ...(c.m || {}) },
     // v1 stored self-collision while it was off by default; let older saves pick up the new default
     fabric: c.f ? ((c.v || 1) < 2 ? (({ selfCollide, ...f }) => f)(c.f) : c.f) : null,
+    // v1/v2 links have no grain: everything on the straight grain
+    grain: { all: c.g?.a || 'straight', pieces: { ...(c.g?.p || {}) } },
   };
 }
 

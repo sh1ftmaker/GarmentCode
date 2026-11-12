@@ -5,7 +5,8 @@ import { buildGarment, ClothSim, SDF } from './garment.js';
 import { parseBodyBin, prepareMorph, morphBody, measureGirth } from './body.js';
 import { MEASUREMENTS, MEASUREMENT_GROUPS, ANGLE_KEYS, groupName, paramName, paramHelp, valueName, ESSENTIAL } from './labels.js';
 import { TEMPLATES, applyTemplate } from './templates.js';
-import { FABRICS, SWATCHES, simParams } from './fabric.js';
+import { FABRICS, SWATCHES, simParams, grainStretch } from './fabric.js';
+import { GRAIN_MODES, GRAIN_NAMES, GRAIN_HELP, grainMode, pieceGrains } from './grain.js';
 import { buildPieces, sewingSteps, pieceName, cutText } from './pieces.js';
 import { autoLayout, layoutLength, findProblems, regions, fabricToBuy } from './layout.js';
 import { primitives, fabricPrims, toSVG, layoutPDF, patternPDF, planSheet, PAPERS, toDXF, yardText } from './export.js';
@@ -33,6 +34,7 @@ const S = {
   fabric: { id: 'cotton', color: '#c9d6ea', print: 'plain', bend: 0.55, stretch: 0.05, friction: 0.5, res: 2.0, release: false, selfCollide: true },
   template: 'tee',
   source: null,   // null = GarmentCode (Pyodide); else a FreeSewing design id (src/fs)
+  grain: { all: 'straight', pieces: {} },   // grain.js: garment-wide mode for skirt/bodice pieces + per-piece overrides
 };
 const defaults = { design: null, presets: {}, fsDesign: fsDefaults, isFS };
 const undoStack = new History();
@@ -205,7 +207,7 @@ function startDrape() {
     warn(`GarmentCode produced invalid geometry for this combination (panel “${huge.name}” is several metres across). Try other parameters or body measurements.`);
     return;
   }
-  const g = buildGarment(pattern, S.fabric.res, sdf, { armAxes });
+  const g = buildGarment(pattern, S.fabric.res, sdf, { armAxes, grain: S.grain });
   viewer.setGarment(g);
   sim = new ClothSim(g, sdf, { ...simParams(S.fabric), releaseAttachments: S.fabric.release, selfCollision: !!S.fabric.selfCollide });
   paused = false; flat = false;
@@ -240,7 +242,7 @@ function updateDrapeChip() {
 }
 
 // ---------------------------------------------------------------- history / snapshots
-const snapshot = () => ({ source: S.source, design: S.design, base: S.base, measurements: S.measurements, fabric: { ...S.fabric } });
+const snapshot = () => ({ source: S.source, design: S.design, base: S.base, measurements: S.measurements, fabric: { ...S.fabric }, grain: { all: S.grain.all, pieces: { ...S.grain.pieces } } });
 function syncUndoButtons() {
   $('#btn-undo').disabled = !undoStack.canUndo;
   $('#btn-redo').disabled = !undoStack.canRedo;
@@ -254,6 +256,7 @@ async function applySnapshot(snap, { record = true } = {}) {
   S.base = snap.base || 'neutral';
   S.measurements = { ...defaults.presets[S.base], ...(snap.measurements || {}) };
   if (snap.fabric) Object.assign(S.fabric, snap.fabric);
+  S.grain = { all: snap.grain?.all || 'straight', pieces: { ...(snap.grain?.pieces || {}) } };
   S.source = isFS(snap.source) ? snap.source : null;
   if (S.source) {
     S.design = snap.design || fsDefaults(S.source);
@@ -362,6 +365,8 @@ function renderDesignUI() {
   $('#export-menu [data-x="design"]').hidden = !!S.source;
   if (S.source) return renderFSDesignUI(root);
   const d = S.design, meta = d.meta;
+  const g = grainControl(meta);
+  if (g) root.append(g);
   const relevant = new Set(['meta']);
   const addFor = (slot, v) => { for (const g of (RELEVANT[slot][v] || [])) relevant.add(g); };
   for (const slot of ['upper', 'wb', 'bottom']) addFor(slot, meta?.[slot]?.v);
@@ -376,6 +381,28 @@ function renderDesignUI() {
   }
   if (!root.children.length) root.append(el('p', { class: 'muted' }, 'No parameters match your search.'));
   $$('.tpl').forEach(t => t.classList.toggle('active', t.dataset.id === S.template));
+}
+
+/** Garment-wide grain (skirt and bodice pieces; grain.js), shown for skirts, dresses and tops. */
+function grainControl(meta) {
+  const skirt = meta?.bottom?.v && meta.bottom.v !== 'Pants', upper = !!meta?.upper?.v;
+  if (!skirt && !upper) return null;
+  const what = skirt && upper ? 'dress' : skirt ? 'skirt' : 'bodice';
+  const seg = el('div', { class: 'seg', role: 'group', 'aria-label': `Grain of the ${what}` }, GRAIN_MODES.map(m =>
+    el('button', { class: 'seg-btn' + (S.grain.all === m ? ' active' : ''), 'aria-pressed': String(S.grain.all === m), title: GRAIN_HELP[m],
+      onclick: () => setGrain({ ...S.grain, all: m }) }, GRAIN_NAMES[m])));
+  return el('div', { class: 'grain-ctl' },
+    el('div', { class: 'grain-row' }, el('span', {}, `Cut the ${what} on`), seg),
+    el('p', { class: 'muted small' }, GRAIN_HELP[S.grain.all] + (S.grain.all !== 'straight' ? ' Single pieces can be changed in Cutting.' : '')));
+}
+function setGrain(grain) {
+  S.grain = { all: grain.all || 'straight', pieces: { ...(grain.pieces || {}) } };
+  commitHistory();
+  cut.key = '';
+  renderDesignUI();
+  startDrape();
+  if (S.mode === 'cut') refreshCut();
+  if (!$('#pattern-card').hidden) refreshPatternSVG();
 }
 
 /** Options of a FreeSewing design: every option is shown (there are only a few). */
@@ -528,7 +555,7 @@ function renderFabricUI() {
   grid.innerHTML = '';
   for (const f of FABRICS) {
     grid.append(el('button', { class: 'fab' + (S.fabric.id === f.id ? ' active' : ''), onclick: () => {
-      Object.assign(S.fabric, { id: f.id, bend: f.bend, stretch: f.stretch, friction: f.friction });
+      Object.assign(S.fabric, { id: f.id, bend: f.bend, stretch: f.stretch, weft: f.weft, bias: f.bias, friction: f.friction });
       if (f.weave === 'twill' && S.fabric.print === 'plain') S.fabric.print = 'twill';
       renderFabricUI(); applyFabricLook(); commitHistory(); startDrape();
     } }, el('b', {}, f.name), el('span', {}, f.note)));
@@ -544,6 +571,8 @@ function renderFabricUI() {
   custom.onchange = () => { renderFabricUI(); commitHistory(); };
   sw.append(custom);
   $('#print-select').value = S.fabric.print;
+  const gs = grainStretch(S.fabric);
+  $('#weft').value = gs.weft; $('#bias').value = gs.bias;
   $('#bend').value = S.fabric.bend; $('#stretch').value = S.fabric.stretch; $('#fric').value = S.fabric.friction; $('#res').value = S.fabric.res;
   $('#release-attach').checked = !!S.fabric.release;
   $('#self-collide').checked = !!S.fabric.selfCollide;
@@ -558,13 +587,16 @@ function applyFabricLook() {
 function labelSliders() {
   const b = +$('#bend').value, s = +$('#stretch').value;
   $('#bend-val').textContent = b < 0.25 ? 'very soft' : b < 0.5 ? 'soft' : b < 0.75 ? 'medium' : 'stiff';
-  $('#stretch-val').textContent = s < 0.15 ? 'woven' : s < 0.5 ? 'some stretch' : 'stretchy';
+  $('#stretch-val').textContent = s < 0.15 ? 'firm' : s < 0.5 ? 'some stretch' : 'stretchy';
+  const word = (v) => (v < 0.3 ? 'firm' : v < 0.6 ? 'a little' : v < 0.85 ? 'gives' : 'very stretchy');
+  $('#weft-val').textContent = word(+$('#weft').value); $('#bias-val').textContent = word(+$('#bias').value);
   $('#fric-val').textContent = (+$('#fric').value).toFixed(2);
   $('#res-val').textContent = `${(+$('#res').value).toFixed(1)} cm`;
 }
-for (const [id, key] of [['bend', 'bend'], ['stretch', 'stretch'], ['fric', 'friction'], ['res', 'res']]) {
+for (const [id, key] of [['bend', 'bend'], ['stretch', 'stretch'], ['weft', 'weft'], ['bias', 'bias'], ['fric', 'friction'], ['res', 'res']]) {
   $('#' + id).addEventListener('input', labelSliders);
   $('#' + id).addEventListener('change', () => {
+    if (key === 'weft' || key === 'bias') Object.assign(S.fabric, grainStretch(S.fabric));
     S.fabric[key] = +$('#' + id).value;
     commitHistory();
     if (key === 'res') regenerate(); else startDrape();
@@ -590,12 +622,12 @@ function measureNote() {   // printed on every piece so a pattern can be matched
 async function ensurePieces() {
   const sa = +$('#seam-allowance').value;
   const note = measureNote();
-  const key = `${genToken}|${sa}|${note}`;
+  const key = `${genToken}|${sa}|${note}|${JSON.stringify(S.grain)}`;
   if (cut.key === key && cut.pieces) return false;
   const data = S.source
     ? await fsPattern(S.source, S.design, S.measurements, curBody, { res: 0.5, drape: false })   // the real (stretch) pattern
     : await py('pieces', { res: 0.5 });
-  const set = buildPieces(data, { sa, note });
+  const set = buildPieces(data, { sa, note, grain: S.grain });
   const sameSet = cut.pieces && cut.pieces.pieces.map(p => p.id).join() === set.pieces.map(p => p.id).join() && cut.sa === sa;
   cut.pieces = set; cut.sa = sa; cut.key = key;
   return !cut.layout || !sameSet || !cut.edited;
@@ -706,12 +738,31 @@ function renderLayout() {
     : '';
   const ba = $('#btn-alt');
   if (ba) ba.onclick = () => { setFolded(alt.folded); cut.layout = alt; cut.alt = null; cut.edited = false; renderLayout(); relayoutAlt(); };
-  $('#cut-list').innerHTML = set.groups.map(g => `<li><b>${esc(g.name)}</b><span>${cutText(g, { folded: L.folded })}</span></li>`).join('');
+  // cutting list, with the grain of each piece (straight / cross / bias), stored per piece
+  const list = $('#cut-list');
+  list.innerHTML = '';
+  for (const g of set.groups) {
+    const rep = byId[g.members[0].id];
+    const sel = el('select', { class: 'grain-sel', 'aria-label': `Grain of ${g.name}`, title: GRAIN_HELP[rep?.grainMode || 'straight'] },
+      GRAIN_MODES.map(m => el('option', { value: m, selected: (rep?.grainMode || 'straight') === m }, GRAIN_NAMES[m].replace(' (45°)', ''))));
+    sel.onchange = () => {
+      const pieces = { ...S.grain.pieces };
+      for (const m of g.members) {
+        const raw = m.id.replace(/_lining$/, '');
+        // no override when the piece would get this grain anyway
+        if (grainMode(raw, { all: S.grain.all }) === sel.value) { delete pieces[raw]; delete pieces[m.id]; } else pieces[raw] = sel.value;
+      }
+      setGrain({ all: S.grain.all, pieces });
+    };
+    list.append(el('li', {}, el('b', {}, g.name), el('span', {}, cutText(g, { folded: L.folded }), sel)));
+  }
   $('#sew-steps').innerHTML = sewingSteps(set).map(s => `<li>${s}</li>`).join('');
   const names = (ids) => [...new Set(ids.map(id => byId[id]?.name || id))].join(', ');
   const notes = [];
   if (L.tooWide?.length) notes.push(`${names(L.tooWide)} ${L.tooWide.length > 1 ? 'are' : 'is'} wider than ${W} cm fabric, even turned sideways (shown in red, sticking out). Choose a wider fabric, or cut ${L.tooWide.length > 1 ? 'them' : 'it'} in two and add a seam.`);
   if (L.crossGrain?.length) notes.push(`${names(L.crossGrain)} only fit${L.crossGrain.length > 1 ? '' : 's'} turned 90° (cross-grain): fine for most stable wovens, not for stretch fabric or one-way prints. A wider fabric avoids it.`);
+  const bias = set.pieces.filter(p => p.grainMode === 'bias');
+  if (bias.length) notes.push(`${names(bias.map(p => p.id))}: cut on the bias, laid at 45° to the selvedge (takes more fabric). Handle bias edges gently, they stretch; staystitch them and let the garment hang a day before hemming.`);
   if (L.folded && (L.movedOpen?.length || L.singles?.length)) notes.push(`${names([...(L.movedOpen || []), ...(L.singles || [])])}: cut from the opened-out fabric below the folded part.`);
   warn(notes.join(' '));
   if (problems.size) toast(`${problems.size} piece${problems.size > 1 ? 's overlap' : ' overlaps'} or leave the fabric (shown in red).`);
@@ -822,7 +873,7 @@ $('#btn-fit').onclick = () => {
 $('#btn-body').onclick = () => { const on = !$('#btn-body').classList.contains('on'); $('#btn-body').classList.toggle('on', on); viewer.showBody(on); };
 $('#btn-camera').onclick = () => { if (viewer.ok) viewer.resetCamera(); };
 async function refreshPatternSVG() {
-  try { $('#pattern-svg').innerHTML = (S.source ? await fsSVG(S.source, S.design, S.measurements, curBody) : await py('svg')) || '<p class="muted">Empty pattern</p>'; }
+  try { $('#pattern-svg').innerHTML = (S.source ? await fsSVG(S.source, S.design, S.measurements, curBody) : await py('svg', { grains: pattern ? pieceGrains(pattern, S.grain) : {} })) || '<p class="muted">Empty pattern</p>'; }
   catch (e) { $('#pattern-svg').textContent = `Could not draw the pattern: ${e.message}`; }
 }
 $('#btn-pattern').onclick = () => {

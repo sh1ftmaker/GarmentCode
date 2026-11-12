@@ -106,6 +106,22 @@ export function pieceLoop(part, { fold = null, mirror = false, half = null } = {
 
 // ------------------------------------------------------------------ conversion
 /**
+ * The piece's grainline from FreeSewing's cut list (set by its grainline / cut-on-fold
+ * macros when drafted with complete: true), as a unit vector in local piece coordinates.
+ */
+function grainOf(draft, ps) {
+  const deg = draft.setStores?.[0]?.cutlist?.[ps.part]?.grain;
+  if (typeof deg !== 'number' || !isFinite(deg)) return null;
+  const a = deg * Math.PI / 180, sx = ps.mirror ? -1 : 1;
+  // FreeSewing angles are counter-clockwise on screen (y down); local = (sx x, -y) / 10
+  let g = [sx * Math.cos(a), Math.sin(a)];
+  if (Math.abs(g[0]) < 1e-9) g[0] = 0;
+  if (Math.abs(g[1]) < 1e-9) g[1] = 0;
+  if (g[1] < 0 || (g[1] === 0 && g[0] * sx < 0)) g = [-g[0], -g[1]];   // point up (or outwards)
+  return g;
+}
+
+/**
  * @param {object} draft   drafted FreeSewing pattern (pattern.draft() result)
  * @param {object} spec    design adapter description:
  *   pieces: [{ name, part, fold?, mirror?, label?, lining?, cutOnly?, doubled?, follow? }]
@@ -256,7 +272,10 @@ export function convertDraft(draft, spec, { res = 1.5, place = null, attachLevel
       // zero normal: garment.js then leaves placement to map3d (no cylinder wrap)
       rotation: [[1, 0, 0], [0, 1, 0], [0, 0, 0]],
       translation: [0, 0, 0],
+      mirror: !!c.ps.mirror,
     };
+    const grain = grainOf(draft, c.ps);
+    if (grain) panel.grain = grain;
     if (place) panel.map3d = place(c.ps, c.loop, c.part);
     panels.push(panel);
     // a second, identical layer (e.g. a lined pouch): cut, not draped

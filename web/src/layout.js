@@ -1,6 +1,8 @@
 // Cutting layout: arrange cut pieces on a bolt of fabric, grain along the fabric length.
 //
 // Fabric coordinates: x across the width, y along the length (downwards), cm.
+// pieces.js has already turned every piece so that its grain (grain.js) is its local y; a bias
+// piece therefore lies at 45°, which the outline-based nesting handles like any other shape.
 // Each piece keeps its grainline (local y) parallel to the selvedge: rotation 0 or 180°
 // (180 only when the fabric has no nap / one-way print). Pieces wider than the fabric may
 // turn 90/270 (cross-grain) and are reported.

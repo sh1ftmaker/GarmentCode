@@ -152,6 +152,8 @@ export function primitives(set, layout, { sewLines = true, title = '', note = se
     const up = (() => { const a = xf(piece, it, [0, 0]), b = xf(piece, it, [0, 1]); const l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1; return [(b[0] - a[0]) / l, (b[1] - a[1]) / l]; })();
     const lines = itemLines(set, layout, it, piece, g);
     const extra = [];
+    if (piece.grainMode === 'bias') extra.push('Cut on the bias (45°)');
+    else if (piece.grainMode === 'cross') extra.push('Cut on the cross grain');
     if (note) extra.push(note);
     if (layout.sheet) extra.push(sa > 0 ? `Seam allowance ${sa} cm included` : 'No seam allowance included');
     const sizes = [1, 0.62, 0.5, 0.5, 0.5, 0.5].slice(0, lines.length + extra.length);

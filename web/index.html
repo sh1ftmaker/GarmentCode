@@ -143,11 +143,17 @@
             <option value="gingham">Gingham</option>
             <option value="dots">Polka dots</option>
           </select></label>
+        <div class="grain-box">
+          <div class="grain-head"><span>Stretch by direction</span><svg class="grain-ico" viewBox="0 0 40 40" aria-hidden="true"><path d="M20 4v32M4 20h32M8 32L32 8" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M17 8l3-4 3 4M28 8h4v4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></div>
+          <label class="field"><span>Lengthwise · warp <b id="stretch-val"></b></span><input id="stretch" type="range" min="0" max="1" step="0.01" value="0.1"></label>
+          <label class="field"><span>Crosswise · weft <b id="weft-val"></b></span><input id="weft" type="range" min="0" max="1" step="0.01" value="0.5"></label>
+          <label class="field"><span>Bias · 45° <b id="bias-val"></b></span><input id="bias" type="range" min="0" max="1" step="0.01" value="0.8"></label>
+          <p class="muted small">The warp runs along the selvedge and is the firmest, the weft runs across and gives a little more; on the bias (45°) a woven shears, so bias-cut pieces stretch, cling and drape softly. Knits stretch mostly crosswise. Choose the grain per garment in Design, per piece in Cutting.</p>
+        </div>
         <label class="check"><input id="self-collide" type="checkbox" checked> Cloth self-collision: folds, layers and trouser legs don't pass through each other (a little slower on large garments)</label>
         <details class="adv">
           <summary>Simulation settings</summary>
           <label class="field"><span>Stiffness <b id="bend-val"></b></span><input id="bend" type="range" min="0" max="1" step="0.01" value="0.5"></label>
-          <label class="field"><span>Stretch <b id="stretch-val"></b></span><input id="stretch" type="range" min="0" max="1" step="0.01" value="0.1"></label>
           <label class="field"><span>Friction <b id="fric-val"></b></span><input id="fric" type="range" min="0" max="1" step="0.01" value="0.5"></label>
           <label class="field"><span>Mesh resolution <b id="res-val"></b></span><input id="res" type="range" min="1.2" max="4" step="0.1" value="2"></label>
           <label class="check"><input id="release-attach" type="checkbox"> Release waist/neck attachments after 400 frames (as GarmentCode's simulator does)</label>

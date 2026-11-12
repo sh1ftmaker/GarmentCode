@@ -350,12 +350,71 @@ class WebGarment:
         return json.dumps({'pattern': self.pattern.pattern,
                            'properties': self.pattern.properties}, indent=2)
 
-    def svg(self):
+    def svg(self, grains_json=''):
+        """GarmentCode's pattern drawing; with grains ({panel: {vec: [x, y], mode}}, from
+        the web app's grain.js) a grainline arrow is drawn on every panel."""
         if self.pattern is None or not self.pattern.pattern['panels']:
             return ''
         dwg = self.pattern.get_svg('/tmp/pattern.svg', with_text=True,
                                    view_ids=False, fill_panels=True, margin=2)
+        grains = json.loads(grains_json) if grains_json else {}
+        if grains:
+            try:
+                self._grain_arrows(dwg, grains)
+            except Exception:   # the drawing without arrows is still useful
+                pass
         return dwg.tostring()
+
+    def _grain_arrows(self, dwg, grains):
+        """Arrows placed exactly as get_svg places the panels (pygarment wrappers.py)."""
+        from scipy.spatial.transform import Rotation
+        pat = self.pattern
+        names = [n for n in pat.panel_order() if n is not None]
+        placed = {}
+        for name in names:
+            panel = pat.pattern['panels'][name]
+            verts = np.asarray(panel['vertices'], dtype=float)
+            v, tr = pat._verts_to_px_coords(verts.copy(), np.array(panel['translation'][:2], dtype=float))
+            res = Rotation.from_euler('XYZ', panel['rotation'], degrees=True).apply([0, 1, 0])
+            ang = np.rad2deg(pat_utils.vector_angle([0, 1], res[:2]))
+            path, _, front = pat._draw_a_panel(name, apply_transform=True, fill=True)
+            offset = np.min(verts * np.array([1, -1]), axis=0)
+
+            def to_px(p, v0=v[0], ang=ang, tr=tr, offset=offset):
+                z = complex(p[0] - offset[0], -p[1] - offset[1])
+                z = (z - complex(*v0)) * np.exp(1j * np.deg2rad(-ang)) + complex(*v0)
+                return z + complex(*tr)
+            placed[name] = (path, front, to_px, verts)
+        fronts = [p for p in placed.values() if p[1]]
+        backs = [p for p in placed.values() if not p[1]]
+        shift = 0
+        if fronts and backs:
+            shift = max(p[0].bbox()[1] for p in fronts) - min(p[0].bbox()[0] for p in backs) + 10
+        for name, (path, front, to_px, verts) in placed.items():
+            g = grains.get(name)
+            if not g:
+                continue
+            gx, gy = g['vec']
+            # direction on the drawing; arrow through the centre of the drawn panel
+            u = to_px(np.array([gx, gy])) - to_px(np.array([0., 0.]))
+            u = u / (abs(u) or 1.0)
+            x0, x1, y0, y1 = path.bbox()
+            mid = complex((x0 + x1) / 2, (y0 + y1) / 2) + (0 if front else shift)
+            half = 0.3 * min((x1 - x0) / max(abs(u.real), 1e-6), (y1 - y0) / max(abs(u.imag), 1e-6))
+            a, b = mid - u * half, mid + u * half
+            L = 2 * half
+            h = min(2.0, 0.15 * L)
+            col = 'rgb(181,83,47)'
+            grp = dwg.g(stroke=col, fill='none', stroke_width=0.35)
+            grp.add(dwg.line((a.real, a.imag), (b.real, b.imag)))
+            for tip, s in ((a, -1), (b, 1)):
+                base = tip - s * u * h
+                n = u * 1j * h * 0.5
+                grp.add(dwg.polyline([((base + n).real, (base + n).imag), (tip.real, tip.imag), ((base - n).real, (base - n).imag)]))
+            dwg.add(grp)
+            if g.get('mode') == 'bias':
+                m = (a + b) / 2 + u * 1j * 2.2
+                dwg.add(dwg.text('bias', insert=(m.real, m.imag), fill=col, font_size='3', text_anchor='middle'))
 
 
 gc = WebGarment()
