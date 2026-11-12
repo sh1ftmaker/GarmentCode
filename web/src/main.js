@@ -6,9 +6,9 @@ import { parseBodyBin, prepareMorph, morphBody, measureGirth } from './body.js';
 import { MEASUREMENTS, MEASUREMENT_GROUPS, ANGLE_KEYS, groupName, paramName, paramHelp, valueName, ESSENTIAL } from './labels.js';
 import { TEMPLATES, applyTemplate } from './templates.js';
 import { FABRICS, SWATCHES, simParams } from './fabric.js';
-import { buildPieces, sewingSteps, pieceName } from './pieces.js';
-import { autoLayout, layoutLength, findProblems, placed } from './layout.js';
-import { primitives, toSVG, layoutPDF, tiledPDF, toDXF } from './export.js';
+import { buildPieces, sewingSteps, pieceName, cutText } from './pieces.js';
+import { autoLayout, layoutLength, findProblems, regions, fabricToBuy } from './layout.js';
+import { primitives, fabricPrims, toSVG, layoutPDF, patternPDF, planSheet, PAPERS, toDXF, yardText } from './export.js';
 import { FS_DESIGNS, fsDefaults, isFS, fsPattern, fsSVG, fsSettings, fsRandomize } from './fs/index.js';
 import { History, compactSnapshot, expandSnapshot, encodeShare, decodeShare, saves, profiles, lastState, prefs } from './state.js';
 
@@ -39,7 +39,8 @@ const viewer = new Viewer($('#three'));
 const bodies = {};            // base name -> { base, prep, sdfBuf }
 let sdf = null, sdfReady = Promise.resolve(), sdfToken = 0;
 let sim = null, pattern = null, genToken = 0, paused = false, flat = false;
-const cut = { pieces: null, layout: null, edited: false, key: '', sa: 1.5 };
+const cut = { pieces: null, layout: null, alt: null, edited: false, key: '', sa: 1.5, folded: false, job: 0 };
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // ---------------------------------------------------------------- status & toasts
 function status(text, busy = false) { $('#status-text').textContent = text; $('#status').classList.toggle('idle', !busy); }
@@ -593,22 +594,71 @@ $('#self-collide').onchange = (e) => { S.fabric.selfCollide = e.target.checked; 
 $('#print-select').onchange = (e) => { S.fabric.print = e.target.value; applyFabricLook(); commitHistory(); };
 
 // ---------------------------------------------------------------- cutting layout
+// Pieces -> layout on a bolt of fabric (layout.js, nesting search in a worker) -> exports.
+function fabricWidth() {
+  const v = $('#fabric-width').value;
+  return v === 'custom' ? Math.max(30, Math.min(400, Math.round(+$('#fabric-custom').value || 130))) : +v;
+}
+const cutOpts = () => ({ width: fabricWidth(), folded: cut.folded, allowRotate: $('#allow-rotate').checked });
+function measureNote() {   // printed on every piece so a pattern can be matched to its body later
+  const m = S.measurements || {};
+  const f = (k) => (m[k] == null ? null : S.unit === 'in' ? (m[k] / 2.54).toFixed(1) : Math.round(m[k]));
+  const parts = [['Bust', 'bust'], ['Waist', 'waist'], ['Hips', 'hips'], ['Height', 'height']].filter(([, k]) => m[k] != null).map(([n, k]) => `${n} ${f(k)}`);
+  return parts.length ? `${parts.join(' · ')} ${S.unit === 'in' ? 'in' : 'cm'}` : '';
+}
 async function ensurePieces() {
   const sa = +$('#seam-allowance').value;
-  const key = `${genToken}|${sa}`;
-  if (cut.key === key && cut.pieces) return cut;
+  const note = measureNote();
+  const key = `${genToken}|${sa}|${note}`;
+  if (cut.key === key && cut.pieces) return false;
   const data = S.source
     ? await fsPattern(S.source, S.design, S.measurements, curBody, { res: 0.5, drape: false })   // the real (stretch) pattern
     : await py('pieces', { res: 0.5 });
-  const set = buildPieces(data, { sa });
+  const set = buildPieces(data, { sa, note });
   const sameSet = cut.pieces && cut.pieces.pieces.map(p => p.id).join() === set.pieces.map(p => p.id).join() && cut.sa === sa;
   cut.pieces = set; cut.sa = sa; cut.key = key;
-  if (!cut.layout || !sameSet || !cut.edited) relayout();
-  return cut;
+  return !cut.layout || !sameSet || !cut.edited;
 }
-function relayout() {
-  cut.layout = autoLayout(cut.pieces.pieces, { width: +$('#fabric-width').value, allowRotate: $('#allow-rotate').checked });
-  cut.edited = false;
+
+// nesting search in a worker (falls back to a quick greedy pass on the main thread)
+let layoutWorker = null, layoutJobs = 0;
+const pendingLayouts = new Map();
+function slimSet(set) {
+  return {
+    pieces: set.pieces.map(p => ({ id: p.id, cut: p.cut, sew: p.sew, bbox: p.bbox, area: p.area, sym: p.sym, group: p.group, flip: p.flip })),
+    groups: set.groups.map(g => ({ id: g.id, members: g.members.map(m => ({ id: m.id, flip: m.flip })), sym: g.sym, count: g.count })),
+  };
+}
+function arrange(opts, budget) {
+  try {
+    if (!layoutWorker) {
+      layoutWorker = new Worker(new URL('./layout-worker.js', import.meta.url), { type: 'module' });
+      layoutWorker.onmessage = (e) => { const p = pendingLayouts.get(e.data.id); if (p) { pendingLayouts.delete(e.data.id); e.data.error ? p.reject(new Error(e.data.error)) : p.resolve(e.data.layout); } };
+      layoutWorker.onerror = () => { for (const p of pendingLayouts.values()) p.reject(new Error('layout worker failed')); pendingLayouts.clear(); layoutWorker = null; };
+    }
+    const id = ++layoutJobs;
+    return new Promise((resolve, reject) => {
+      pendingLayouts.set(id, { resolve, reject });
+      layoutWorker.postMessage({ id, set: slimSet(cut.pieces), opts: { ...opts, timeBudget: budget } });
+    }).catch(() => autoLayout(cut.pieces, { ...opts, timeBudget: Math.min(budget, 200) }));
+  } catch {
+    return Promise.resolve(autoLayout(cut.pieces, { ...opts, timeBudget: Math.min(budget, 200) }));
+  }
+}
+async function relayout() {
+  const job = ++cut.job;
+  const opts = cutOpts();
+  cut.layout = autoLayout(cut.pieces, { ...opts, timeBudget: 0 });   // instant first answer
+  cut.edited = false; cut.alt = null;
+  renderLayout();
+  status('Optimising the layout…', true);
+  const set = cut.pieces;
+  const [best, alt] = await Promise.all([arrange(opts, 1500), arrange({ ...opts, folded: !opts.folded }, 500)]);
+  if (job !== cut.job || set !== cut.pieces) return;
+  if (!cut.edited && best.length < cut.layout.length - 1e-6) cut.layout = best;
+  cut.alt = alt;
+  status(`${set.pieces.length} pattern pieces`);
+  if (S.mode === 'cut') renderLayout();
 }
 async function refreshCut() {
   if (!pattern || !pattern.panels.length) {
@@ -616,83 +666,104 @@ async function refreshCut() {
     return;
   }
   status('Preparing pattern pieces…', true);
-  try { await ensurePieces(); } catch (e) { warn(e.message); return; }
-  renderLayout();
-  status(`${cut.pieces.pieces.length} pattern pieces`);
+  let fresh;
+  try { fresh = await ensurePieces(); } catch (e) { warn(e.message); return; }
+  if (fresh) await relayout();
+  else { renderLayout(); status(`${cut.pieces.pieces.length} pattern pieces`); }
 }
 const polyArea = (pts) => { let a = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += p[0] * q[1] - q[0] * p[1]; } return Math.abs(a / 2); };
-function piecePrims(all) {   // group primitives (emitted piece by piece) by piece id
-  const by = {};
-  let cur = null;
-  for (const q of all) { if (q.k === 'cut') cur = q.id; (by[cur] ||= []).push(q); }
-  return by;
-}
+const lenText = (cm) => (S.unit === 'in' ? `${Math.ceil(cm / 2.54)} in` : `${Math.ceil(cm)} cm`);
 function renderLayout() {
-  const { pieces } = cut.pieces, L = cut.layout;
-  const W = L.width, len = Math.max(20, Math.ceil(layoutLength(pieces, L.placements) + 4));
+  const set = cut.pieces, L = cut.layout;
+  if (!set || !L) return;
+  const W = L.width, length = layoutLength(set, L), len = Math.max(20, Math.ceil(length + 4));
   const view = $('#layout-view');
-  const pxPerCm = Math.min(7, Math.max(2, (view.clientWidth - 48) / (W + 4)));
+  const x0 = -5, y0 = -4, vw = W + 14, vh = len + 6;
+  const pxPerCm = Math.min(7, Math.max(2, (view.clientWidth - 48) / vw));
   const NS = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(NS, 'svg');
-  svg.setAttribute('viewBox', `-2 -4 ${W + 4} ${len + 6}`);
-  svg.setAttribute('width', (W + 4) * pxPerCm);
-  svg.setAttribute('height', (len + 6) * pxPerCm);
+  svg.setAttribute('viewBox', `${x0} ${y0} ${vw} ${vh}`);
+  svg.setAttribute('width', vw * pxPerCm);
+  svg.setAttribute('height', vh * pxPerCm);
+  const inner = (prims) => toSVG(prims, 1, 1, { units: false, bg: false }).replace(/^<svg[^>]*>|<\/svg>$/g, '');
   let grid = '';
-  for (let x = 0; x <= W; x += 10) grid += `<line x1="${x}" y1="0" x2="${x}" y2="${len}" stroke="#000" stroke-opacity="${x % 50 ? .05 : .12}" stroke-width=".1"/>`;
-  for (let y = 0; y <= len; y += 10) grid += `<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="#000" stroke-opacity="${y % 50 ? .05 : .12}" stroke-width=".1"/>`;
-  svg.innerHTML = `<rect x="0" y="0" width="${W}" height="${len}" fill="#f6efe4" stroke="#b9ab96" stroke-width=".25"/>${grid}
-    <text x="0" y="-1.2" font-size="1.8" fill="#8e877d" font-family="Inter, sans-serif">← selvedge · ${W} cm wide · grain runs top to bottom</text>`;
-  const problems = findProblems(pieces, L.placements, W);
-  const local = Object.fromEntries(pieces.map(p => [p.id, { x: 0, y: 0, rot: L.placements[p.id].rot }]));
-  const by = piecePrims(primitives(cut.pieces, { placements: local }, { sewLines: $('#show-sewline').checked }));
-  for (const p of pieces) {
-    const pl = L.placements[p.id];
+  const { split } = regions(set, L);
+  for (let x = 10; x < W; x += 10) {
+    const top = L.folded && split > 0 && x > W / 2 ? (L.items.some(i => i.region === 'open') ? split : len) : 0;
+    if (top < len) grid += `<line x1="${x}" y1="${top}" x2="${x}" y2="${len}" stroke="#000" stroke-opacity="${x % 50 ? .04 : .1}" stroke-width=".1"/>`;
+  }
+  for (let y = 10; y < len; y += 10) grid += `<line x1="0" y1="${y}" x2="${L.folded && split > 0 && y < split ? W / 2 : W}" y2="${y}" stroke="#000" stroke-opacity="${y % 50 ? .04 : .1}" stroke-width=".1"/>`;
+  const fab = fabricPrims(set, L, { length: len });
+  svg.innerHTML = `<g class="fabric">${grid}${inner(fab)}</g>
+    <text x="0" y="-1.4" font-size="1.8" fill="#8e877d" font-family="Inter, sans-serif">${W} cm (${Math.round(W / 2.54)}″) wide${L.folded ? ', folded lengthwise' : ''} · grain runs top to bottom</text>`;
+  const problems = findProblems(set, L);
+  const prims = primitives(set, L, { sewLines: $('#show-sewline').checked });
+  const by = {};
+  for (const q of prims) (by[q.id] ||= []).push(q);
+  for (const it of L.items) {
     const g = document.createElementNS(NS, 'g');
-    g.setAttribute('class', 'piece' + (problems.has(p.id) ? ' overlap' : ''));
-    g.dataset.id = p.id;
-    g.setAttribute('transform', `translate(${pl.x} ${pl.y})`);
-    g.innerHTML = toSVG(by[p.id] || [], 1, 1, { units: false, bg: false }).replace(/^<svg[^>]*>|<\/svg>$/g, '').replace('<path ', '<path class="cut" ');
+    g.setAttribute('class', 'piece' + (problems.has(it.id) ? ' overlap' : '') + (it.fold ? ' on-fold' : ''));
+    g.dataset.id = it.id;
+    g.innerHTML = inner(by[it.id] || []);
     svg.append(g);
   }
   view.innerHTML = '';
   view.append(svg);
   enableDrag(svg, pxPerCm);
-  const usedArea = pieces.reduce((s, p) => s + polyArea(placed(p, L.placements[p.id])), 0);
-  const length = layoutLength(pieces, L.placements);
-  const buyM = Math.ceil((length + 10) / 10) / 10, buyYd = Math.ceil(((length + 10) / 91.44) * 8) / 8;
+
+  // summary: what to buy
+  const byId = Object.fromEntries(set.pieces.map(p => [p.id, p]));
+  const pieceArea = set.pieces.reduce((s, p) => s + polyArea(p.cut), 0);
+  const buy = fabricToBuy(length);
   $('#cut-summary').innerHTML = `
-    <div class="stat"><b>${buyM.toFixed(1)} m</b><span>${buyYd.toFixed(2)} yd to buy</span></div>
-    <div class="stat"><b>${Math.round(usedArea / (W * Math.max(1, length)) * 100)}%</b><span>fabric used</span></div>
-    <div class="stat"><b>${pieces.length}</b><span>pieces</span></div>`;
-  $('#sew-steps').innerHTML = sewingSteps(cut.pieces).map(s => `<li>${s}</li>`).join('');
-  if (problems.size) toast(`${problems.size} piece${problems.size > 1 ? 's overlap' : ' overlaps'} or leave the fabric (shown in red).`);
+    <div class="stat"><b>${S.unit === 'in' ? yardText(buy.yd) : `${buy.m.toFixed(1)} m`}</b><span>to buy (${S.unit === 'in' ? `${buy.m.toFixed(1)} m` : yardText(buy.yd)})</span></div>
+    <div class="stat"><b>${lenText(length)}</b><span>layout length</span></div>
+    <div class="stat"><b>${Math.round(pieceArea / (W * Math.max(1, length)) * 100)}%</b><span>of the fabric used</span></div>`;
+  const alt = cut.alt;
+  $('#cut-compare').innerHTML = alt && Math.abs(alt.width - W) < 1e-6 && alt.folded !== L.folded
+    ? `${alt.folded ? 'Folded lengthwise' : 'As a single layer'} it would take ${S.unit === 'in' ? yardText(fabricToBuy(alt.length).yd) : `${fabricToBuy(alt.length).m.toFixed(1)} m`}${alt.length < length - 5 ? ' (less)' : alt.length > length + 5 ? ' (more)' : ''}. <button class="linkish" id="btn-alt">Use that</button>`
+    : '';
+  const ba = $('#btn-alt');
+  if (ba) ba.onclick = () => { setFolded(alt.folded); cut.layout = alt; cut.alt = null; cut.edited = false; renderLayout(); relayoutAlt(); };
+  $('#cut-list').innerHTML = set.groups.map(g => `<li><b>${esc(g.name)}</b><span>${cutText(g, { folded: L.folded })}</span></li>`).join('');
+  $('#sew-steps').innerHTML = sewingSteps(set).map(s => `<li>${s}</li>`).join('');
+  const names = (ids) => [...new Set(ids.map(id => byId[id]?.name || id))].join(', ');
   const notes = [];
-  if (L.tooWide?.length) notes.push(`${L.tooWide.length} piece(s) are wider than this fabric, even turned. Choose a wider fabric or cut them separately.`);
-  if (L.crossGrain?.length) notes.push(`${L.crossGrain.length} piece(s) only fit turned 90° (cross-grain). Fine for most wovens, not for stretch or one-way prints.`);
+  if (L.tooWide?.length) notes.push(`${names(L.tooWide)} ${L.tooWide.length > 1 ? 'are' : 'is'} wider than ${W} cm fabric, even turned sideways (shown in red, sticking out). Choose a wider fabric, or cut ${L.tooWide.length > 1 ? 'them' : 'it'} in two and add a seam.`);
+  if (L.crossGrain?.length) notes.push(`${names(L.crossGrain)} only fit${L.crossGrain.length > 1 ? '' : 's'} turned 90° (cross-grain): fine for most stable wovens, not for stretch fabric or one-way prints. A wider fabric avoids it.`);
+  if (L.folded && (L.movedOpen?.length || L.singles?.length)) notes.push(`${names([...(L.movedOpen || []), ...(L.singles || [])])}: cut from the opened-out fabric below the folded part.`);
   warn(notes.join(' '));
+  if (problems.size) toast(`${problems.size} piece${problems.size > 1 ? 's overlap' : ' overlaps'} or leave the fabric (shown in red).`);
+}
+async function relayoutAlt() {   // refresh the comparison line after switching
+  const job = cut.job, opts = cutOpts();
+  const alt = await arrange({ ...opts, folded: !opts.folded }, 500);
+  if (job === cut.job) { cut.alt = alt; if (S.mode === 'cut') renderLayout(); }
 }
 function enableDrag(svg, pxPerCm) {
   let drag = null;
   svg.addEventListener('pointerdown', (e) => {
     const g = e.target.closest('.piece');
     if (!g) return;
-    const pl = cut.layout.placements[g.dataset.id];
-    drag = { g, id: g.dataset.id, sx: e.clientX, sy: e.clientY, x0: pl.x, y0: pl.y, moved: false };
+    const it = cut.layout.items.find(i => i.id === g.dataset.id);
+    if (!it) return;
+    drag = { g, it, sx: e.clientX, sy: e.clientY, dx: 0, dy: 0, moved: false };
     svg.setPointerCapture(e.pointerId);
     e.preventDefault();
   });
   svg.addEventListener('pointermove', (e) => {
     if (!drag) return;
-    const dx = (e.clientX - drag.sx) / pxPerCm, dy = (e.clientY - drag.sy) / pxPerCm;
+    let dx = (e.clientX - drag.sx) / pxPerCm, dy = (e.clientY - drag.sy) / pxPerCm;
     if (Math.abs(dx) + Math.abs(dy) > 0.6) drag.moved = true;
-    const pl = cut.layout.placements[drag.id];
-    pl.x = Math.round((drag.x0 + dx) * 2) / 2; pl.y = Math.round((drag.y0 + dy) * 2) / 2;
-    drag.g.setAttribute('transform', `translate(${pl.x} ${pl.y})`);
+    if (drag.it.fold) dx = 0;   // an on-fold piece stays on the fold
+    drag.dx = Math.round(dx * 2) / 2; drag.dy = Math.round(dy * 2) / 2;
+    drag.g.setAttribute('transform', `translate(${drag.dx} ${drag.dy})`);
   });
   const end = () => {
     if (!drag) return;
-    const pl = cut.layout.placements[drag.id];
-    if (!drag.moved && $('#allow-rotate').checked) pl.rot = (pl.rot + 180) % 360;
+    const it = drag.it;
+    if (drag.moved) { it.x += drag.dx; it.y += drag.dy; }
+    else if ($('#allow-rotate').checked) it.rot = (it.rot + 180) % 360;
     cut.edited = true;
     drag = null;
     renderLayout();
@@ -700,11 +771,33 @@ function enableDrag(svg, pxPerCm) {
   svg.addEventListener('pointerup', end);
   svg.addEventListener('pointercancel', end);
 }
-$('#btn-autolayout').onclick = () => { if (cut.pieces) { relayout(); renderLayout(); } };
-$('#fabric-width').onchange = () => { if (cut.pieces) { relayout(); renderLayout(); } };
-$('#allow-rotate').onchange = () => { if (cut.pieces) { relayout(); renderLayout(); } };
+function setFolded(f) {
+  cut.folded = !!f;
+  $$('#fold-seg .seg-btn').forEach(b => { const on = (b.dataset.fold === '1') === cut.folded; b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); });
+  prefs.set({ cutFolded: cut.folded });
+}
+const reArrange = () => { if (cut.pieces) relayout(); };
+$('#btn-autolayout').onclick = reArrange;
+$('#fabric-width').onchange = () => {
+  $('#fabric-custom-wrap').hidden = $('#fabric-width').value !== 'custom';
+  prefs.set({ fabricWidth: $('#fabric-width').value });
+  reArrange();
+};
+$('#fabric-custom').onchange = () => { prefs.set({ fabricCustom: $('#fabric-custom').value }); reArrange(); };
+$$('#fold-seg .seg-btn').forEach(b => { b.onclick = () => { if ((b.dataset.fold === '1') !== cut.folded) { setFolded(b.dataset.fold === '1'); reArrange(); } }; });
+$('#allow-rotate').onchange = reArrange;
 $('#seam-allowance').onchange = () => { cut.key = ''; refreshCut(); };
 $('#show-sewline').onchange = () => { if (cut.pieces) renderLayout(); };
+$('#paper').onchange = () => prefs.set({ paper: $('#paper').value });
+$('#btn-print-pdf').onclick = async () => { try { await cuttingExport(`pdf-${$('#paper').value}`); } catch (e) { status('Ready'); warn(e.message); } };
+{   // restore cutting preferences
+  const p = prefs.get();
+  if (p.fabricWidth && [...$('#fabric-width').options].some(o => o.value === p.fabricWidth)) $('#fabric-width').value = p.fabricWidth;
+  if (p.fabricCustom) $('#fabric-custom').value = p.fabricCustom;
+  $('#fabric-custom-wrap').hidden = $('#fabric-width').value !== 'custom';
+  setFolded(!!p.cutFolded);
+  $('#paper').value = p.paper || (/^en-(US|CA)|^es-(MX|US)/.test(navigator.language || '') ? 'letter' : 'a4');
+}
 
 // ---------------------------------------------------------------- modes
 function setMode(mode) {
@@ -902,20 +995,32 @@ function garmentOBJ() {
 }
 async function cuttingExport(kind) {
   if (!pattern || !pattern.panels.length) throw new Error('The design is empty.');
-  await ensurePieces();
-  const L = cut.layout, len = Math.ceil(layoutLength(cut.pieces.pieces, L.placements) + 2);
-  const prims = primitives(cut.pieces, L, { sewLines: true, title: designTitle() });
-  const meta = { title: designTitle(), fabricWidth: L.width, fabricLength: len, sa: cut.sa, steps: sewingSteps(cut.pieces) };
-  if (kind === 'svg-layout') return download(`${slug()}-layout.svg`, toSVG(prims, L.width, len), 'image/svg+xml');
-  if (kind === 'dxf') return download(`${slug()}-pattern.dxf`, toDXF(prims), 'application/dxf');
-  status('Building PDF…', true);
-  if (kind === 'pdf-full') download(`${slug()}-cutting-layout.pdf`, await layoutPDF(prims, L.width, len, meta));
-  if (kind === 'pdf-tiles') {
-    const r = await tiledPDF(prims, L.width, len, meta);
-    download(`${slug()}-print-${r.paper.replace(/\s/g, '')}.pdf`, r.blob);
-    toast(`${r.pages} pages on ${r.paper}. Print at 100% scale.`);
+  status('Preparing pattern pieces…', true);
+  if (await ensurePieces() || !cut.layout) cut.layout = autoLayout(cut.pieces, { ...cutOpts(), timeBudget: 300 });
+  const set = cut.pieces, L = cut.layout;
+  const length = layoutLength(set, L), len = Math.ceil(length + 2);
+  const meta = {
+    title: designTitle(), note: set.note, sa: cut.sa, folded: L.folded, fabricWidth: L.width, fabricLength: length,
+    steps: sewingSteps(set), date: new Date().toISOString().slice(0, 10),
+  };
+  const fab = [...fabricPrims(set, L, { length: len }), ...primitives(set, L, { sewLines: true })];
+  const done = () => status('Ready');
+  if (kind === 'svg-layout') { done(); return download(`${slug()}-cutting-layout.svg`, toSVG(fab, L.width + 14, len + 4, { x0: -5, y0: -2 }), 'image/svg+xml'); }
+  if (kind === 'dxf') { done(); return download(`${slug()}-cutting-layout.dxf`, toDXF(fab), 'application/dxf'); }
+  if (kind === 'svg-sheet') {
+    const sh = planSheet(set, { folded: L.folded, paper: PAPERS.roll36, budget: 300 });
+    done();
+    return download(`${slug()}-pattern-pieces.svg`, toSVG(primitives(set, sh.layout, { title: meta.title }), sh.width, sh.length), 'image/svg+xml');
   }
-  status('Ready');
+  status('Building PDF…', true);
+  if (kind === 'pdf-full') download(`${slug()}-cutting-layout-1to1.pdf`, await layoutPDF(fab, L.width, len, meta));
+  const paper = kind.startsWith('pdf-') && PAPERS[kind.slice(4)] ? kind.slice(4) : null;
+  if (paper) {
+    const r = await patternPDF(set, meta, { paper, fabricPrims: fab, fabricSize: [L.width, len] });
+    download(`${slug()}-pattern-${paper}.pdf`, r.blob);
+    toast(`${r.pages} page${r.pages > 1 ? 's' : ''} on ${r.paper}. Print at 100% / actual size and check the test square.`, 4500);
+  }
+  done();
 }
 $('#btn-export').onclick = (e) => { e.stopPropagation(); $('#export-menu').hidden = !$('#export-menu').hidden; };
 document.addEventListener('click', (e) => { if (!e.target.closest('.menu')) $('#export-menu').hidden = true; });
@@ -924,7 +1029,7 @@ $('#export-menu').addEventListener('click', async (e) => {
   if (!k) return;
   $('#export-menu').hidden = true;
   try {
-    if (['pdf-tiles', 'pdf-full', 'svg-layout', 'dxf'].includes(k)) return await cuttingExport(k);
+    if (['pdf-a4', 'pdf-letter', 'pdf-a0', 'pdf-roll36', 'pdf-full', 'svg-layout', 'svg-sheet', 'dxf'].includes(k)) return await cuttingExport(k);
     if (S.source && ['svg', 'spec', 'design'].includes(k)) {   // FreeSewing: its own drawing + settings
       if (k === 'svg') return download(`${slug()}-freesewing.svg`, await fsSVG(S.source, S.design, S.measurements, curBody), 'image/svg+xml');
       return download(`${slug()}-freesewing-settings.json`, JSON.stringify(await fsSettings(S.source, S.design, S.measurements, curBody), null, 2), 'application/json');

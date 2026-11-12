@@ -220,6 +220,14 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 22px; }
 .layout-view svg { display: block; margin: 0 auto; background: #fffdf9; box-shadow: var(--shadow); border-radius: 4px; touch-action: none; }
 .layout-view .piece { cursor: grab; }
 .layout-view .piece.overlap .cut { stroke: #d33; fill: rgba(220, 50, 50, .14); }
+.layout-view .piece:hover .cut { fill: rgba(181, 83, 47, .14); }
+.layout-view .piece.on-fold { cursor: ns-resize; }
+.layout-view .fabric { pointer-events: none; }
+.cutlist { list-style: none; margin: 4px 0 0; padding: 0; font-size: 13px; }
+.cutlist li { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.cutlist li span { color: var(--ink-2); text-align: right; }
+.linkish { border: 0; background: none; padding: 0; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
+#fold-seg { margin-top: 2px; }
 
 /* stage overlays */
 .viewbar {

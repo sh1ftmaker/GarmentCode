@@ -46,10 +46,14 @@
           <button class="btn primary" id="btn-export" aria-haspopup="true">Export</button>
           <div class="menu-pop" id="export-menu" hidden>
             <div class="menu-label">Sewing pattern</div>
-            <button data-x="pdf-tiles">Printable PDF (A4 / Letter tiles)</button>
-            <button data-x="pdf-full">Full-size cutting layout PDF</button>
-            <button data-x="svg-layout">Cutting layout SVG</button>
-            <button data-x="dxf">DXF for CAD / cutters</button>
+            <button data-x="pdf-a4">Printable pattern PDF (A4 tiles)</button>
+            <button data-x="pdf-letter">Printable pattern PDF (US Letter tiles)</button>
+            <button data-x="pdf-a0">Copy shop PDF (A0 sheets)</button>
+            <button data-x="pdf-roll36">Plotter PDF (36″ roll)</button>
+            <button data-x="svg-sheet">Pattern pieces SVG (1:1)</button>
+            <button data-x="pdf-full">Cutting layout PDF (1:1, whole fabric)</button>
+            <button data-x="svg-layout">Cutting layout SVG (1:1)</button>
+            <button data-x="dxf">Cutting layout DXF (mm)</button>
             <button data-x="svg">GarmentCode pattern SVG</button>
             <button data-x="spec">Pattern specification JSON</button>
             <div class="menu-label">3D</div>
@@ -154,16 +158,21 @@
       <section class="page" data-page="cut">
         <div class="page-head">
           <h2>Cutting layout</h2>
-          <p class="muted">Pattern pieces with seam allowance, arranged on your fabric.</p>
+          <p class="muted">Your pattern pieces, with seam allowance, arranged on a bolt of fabric at real size.</p>
         </div>
         <div class="grid2">
           <label class="field"><span>Fabric width</span>
             <select id="fabric-width">
               <option value="90">90 cm (36″)</option>
+              <option value="112">112 cm (44″)</option>
               <option value="115">115 cm (45″)</option>
               <option value="140">140 cm (55″)</option>
-              <option value="150" selected>150 cm (60″)</option>
+              <option value="150" selected>150 cm (59″)</option>
+              <option value="152">152 cm (60″)</option>
+              <option value="custom">Other width…</option>
             </select></label>
+          <label class="field" id="fabric-custom-wrap" hidden><span>Width in cm</span>
+            <input id="fabric-custom" type="number" min="30" max="400" step="1" value="130" inputmode="numeric"></label>
           <label class="field"><span>Seam allowance</span>
             <select id="seam-allowance">
               <option value="0">None</option>
@@ -172,10 +181,34 @@
               <option value="1.5" selected>1.5 cm (⅝″)</option>
             </select></label>
         </div>
-        <label class="check"><input id="allow-rotate" type="checkbox" checked> Allow 180° rotation (fabric without nap or one-way print)</label>
-        <label class="check"><input id="show-sewline" type="checkbox" checked> Show sewing lines and notches</label>
-        <div class="toolrow"><button class="btn" id="btn-autolayout">Auto-arrange</button><span class="muted small">Drag pieces to adjust. Tap a piece to rotate it.</span></div>
+        <div class="field"><span>Lay the fabric</span>
+          <div class="seg" role="group" aria-label="Fabric layers" id="fold-seg">
+            <button class="seg-btn active" data-fold="0" aria-pressed="true">Single layer</button>
+            <button class="seg-btn" data-fold="1" aria-pressed="false">Folded lengthwise</button>
+          </div>
+        </div>
+        <p class="muted small" id="fold-help">Folded: selvedges together, right sides in. Mirrored pairs are cut through both layers at once and symmetric pieces are cut on the fold.</p>
+        <label class="check"><input id="allow-rotate" type="checkbox" checked> Pieces may be turned upside down (fabric without nap or one-way print)</label>
+        <label class="check"><input id="show-sewline" type="checkbox" checked> Show sewing lines, notches and seam numbers</label>
         <div class="summary" id="cut-summary"></div>
+        <p class="muted small" id="cut-compare"></p>
+        <div class="toolrow"><button class="btn" id="btn-autolayout">Re-arrange</button><span class="muted small">Drag pieces to adjust; tap one to turn it 180°. 1 cm is kept free along each selvedge.</span></div>
+        <details class="adv" open>
+          <summary>Cutting list</summary>
+          <ul class="cutlist" id="cut-list"></ul>
+        </details>
+        <details class="adv" open>
+          <summary>Print the pattern</summary>
+          <label class="field"><span>Paper</span>
+            <select id="paper">
+              <option value="a4">A4 (home printer, tiled)</option>
+              <option value="letter">US Letter (home printer, tiled)</option>
+              <option value="a0">A0 sheets (copy shop)</option>
+              <option value="roll36">36″ / 914 mm plotter roll</option>
+            </select></label>
+          <div class="toolrow"><button class="btn primary" id="btn-print-pdf">Download pattern PDF</button></div>
+          <p class="muted small">One copy of each piece, at 100% scale, with a 10 cm / 4 in test square, page grid and alignment marks. The full-size cutting layout (PDF, SVG, DXF) is in the Export menu.</p>
+        </details>
         <details class="adv" open>
           <summary>Sewing order</summary>
           <ol class="steps" id="sew-steps"></ol>
