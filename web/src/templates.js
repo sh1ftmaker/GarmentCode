@@ -3,6 +3,17 @@ export const TEMPLATES = [
   { id: 'tee', name: 'Classic T-shirt', set: {} },
   { id: 'longsleeve', name: 'Long-sleeve top', set: {
     'sleeve.sleeveless': false, 'sleeve.length': 1.0, 'sleeve.end_width': 0.6, 'shirt.length': 1.3 } },
+  { id: 'hoodie', name: 'Hoodie (GarmentCode)', set: {
+    'sleeve.sleeveless': false, 'sleeve.length': 1.0, 'sleeve.end_width': 0.7, 'sleeve.cuff.type': 'CuffBand',
+    'sleeve.cuff.cuff_len': 0.1, 'collar.component.style': 'Hood2Panels', 'shirt.length': 1.75, 'shirt.width': 1.1,
+    'shirt.hem_band.enable': true, 'shirt.pocket.type': 'KangarooPocket' } },
+  { id: 'ziphoodie', name: 'Zip hoodie, open (GarmentCode)', set: {
+    'sleeve.sleeveless': false, 'sleeve.length': 1.0, 'sleeve.end_width': 0.7, 'sleeve.cuff.type': 'CuffBand',
+    'sleeve.cuff.cuff_len': 0.1, 'collar.component.style': 'Hood2Panels', 'shirt.length': 1.75, 'shirt.width': 1.1,
+    'shirt.hem_band.enable': true, 'shirt.pocket.type': 'KangarooPocket', 'shirt.open_front': true } },
+  { id: 'sweatshirt', name: 'Sweatshirt', set: {
+    'sleeve.sleeveless': false, 'sleeve.length': 1.0, 'sleeve.end_width': 0.7, 'sleeve.cuff.type': 'CuffBand',
+    'sleeve.cuff.cuff_len': 0.1, 'shirt.length': 1.6, 'shirt.width': 1.1, 'shirt.hem_band.enable': true } },
   { id: 'aline', name: 'A-line dress', set: {
     'meta.upper': 'FittedShirt', 'meta.wb': null, 'meta.bottom': 'SkirtCircle', 'flare-skirt.suns': 0.45,
     'flare-skirt.length': 0.55, 'sleeve.sleeveless': true, 'collar.f_collar': 'VNeckHalf', 'collar.fc_depth': 0.8 } },
@@ -21,6 +32,9 @@ export const TEMPLATES = [
   { id: 'trousers', name: 'Wide-leg trousers', set: {
     'meta.upper': null, 'meta.wb': 'StraightWB', 'meta.bottom': 'Pants', 'pants.width': 1.4, 'pants.length': 0.9,
     'pants.flare': 1.15 } },
+  { id: 'joggers', name: 'Joggers', set: {
+    'meta.upper': null, 'meta.wb': 'StraightWB', 'meta.bottom': 'Pants', 'pants.length': 1.0, 'pants.width': 1.15,
+    'pants.flare': 0.85, 'pants.cuff.type': 'CuffBand', 'pants.cuff.cuff_len': 0.1 } },
   { id: 'shorts', name: 'Shorts', set: {
     'meta.upper': null, 'meta.wb': 'StraightWB', 'meta.bottom': 'Pants', 'pants.length': 0.3, 'pants.width': 1.1 } },
 ];

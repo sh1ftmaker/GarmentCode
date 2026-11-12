@@ -36,7 +36,7 @@ export const GROUPS = {
   meta: 'Garment', waistband: 'Waistband', shirt: 'Bodice', collar: 'Neckline & collar', sleeve: 'Sleeves',
   left: 'Left side (asymmetry)', skirt: 'Skirt', 'flare-skirt': 'Flared skirt', 'godet-skirt': 'Godet skirt',
   'pencil-skirt': 'Pencil skirt', 'levels-skirt': 'Tiered skirt', pants: 'Pants', component: 'Collar piece',
-  cuff: 'Cuff', 'skirt-many-panels': 'Panels', asymm: 'Asymmetry', cut: 'Cut-out',
+  cuff: 'Cuff', hem_band: 'Hem band', pocket: 'Pocket', 'skirt-many-panels': 'Panels', asymm: 'Asymmetry', cut: 'Cut-out',
 };
 
 export const PARAMS = {
@@ -59,6 +59,12 @@ export const PARAMS = {
   front_slit: ['Front slit'], back_slit: ['Back slit'], left_slit: ['Left slit'], right_slit: ['Right slit'],
   style_side_cut: ['Side cut-out'], level: ['Tier style'], num_levels: ['Number of tiers'],
   level_ruffle: ['Tier gathering'], base_length_frac: ['Base length'],
+  'shirt.open_front': ['Open front', 'Centre front left unsewn, like a zip-up or a cardigan worn open (web port addition)'],
+  'shirt.hem_band.enable': ['Hem band', 'Ribbed band at the hem (web port addition)'],
+  'shirt.hem_band.depth': ['Band depth'], 'shirt.hem_band.fit': ['Band fit', 'Band length relative to the hem it gathers'],
+  'shirt.pocket.type': ['Pocket', 'Front pouch pocket for loose tops (web port addition)'],
+  'shirt.pocket.height': ['Pocket height'], 'shirt.pocket.width': ['Pocket width'],
+  'shirt.pocket.top_width': ['Pocket top width'],
 };
 
 const VALUE_NAMES = {
@@ -68,7 +74,7 @@ const VALUE_NAMES = {
   CircleNeckHalf: 'Round', CurvyNeckHalf: 'Curvy', VNeckHalf: 'V-neck', SquareNeckHalf: 'Square',
   TrapezoidNeckHalf: 'Trapezoid', CircleArcNeckHalf: 'Arc', Bezier2NeckHalf: 'Custom curve',
   Turtle: 'Turtleneck', SimpleLapel: 'Lapel', Hood2Panels: 'Hood', ArmholeSquare: 'Square', ArmholeAngle: 'Angled',
-  ArmholeCurve: 'Curved', CuffBand: 'Band', CuffSkirt: 'Flared', CuffBandSkirt: 'Band + flare',
+  ArmholeCurve: 'Curved', CuffBand: 'Band', KangarooPocket: 'Kangaroo pocket', CuffSkirt: 'Flared', CuffBandSkirt: 'Band + flare',
   Sun: 'Sun', SIGGRAPH_logo: 'SIGGRAPH logo',
 };
 
@@ -87,6 +93,7 @@ export const valueName = (v) => v === null ? 'None' : (VALUE_NAMES[v] || String(
 
 // Parameters shown in "Essentials" mode (the rest stay under "All parameters")
 export const ESSENTIAL = new Set(['meta.upper', 'meta.wb', 'meta.bottom', 'shirt.length', 'shirt.width', 'shirt.strapless',
+  'shirt.open_front', 'shirt.hem_band.enable', 'shirt.pocket.type',
   'collar.f_collar', 'collar.b_collar', 'collar.component.style', 'sleeve.sleeveless', 'sleeve.length', 'sleeve.end_width',
   'skirt.length', 'skirt.flare', 'flare-skirt.length', 'flare-skirt.suns', 'pencil-skirt.length', 'pencil-skirt.flare',
   'levels-skirt.num_levels', 'levels-skirt.length', 'godet-skirt.num_inserts', 'pants.length', 'pants.width', 'pants.flare',
