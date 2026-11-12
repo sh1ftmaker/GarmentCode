@@ -199,6 +199,7 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = 7 } = {})
       P[3 * i + 1] = R[1][0] * x + R[1][1] * y + T[1];
       P[3 * i + 2] = R[2][0] * x + R[2][1] * y + T[2];
     });
+    if (p.map3d) pts.forEach(([x, y], i) => P.set(p.map3d(x, y), 3 * i));   // e.g. FreeSewing pieces (src/fs)
     // Some lone components (e.g. a waistband with nothing to attach to) come out of
     // GarmentCode unplaced: far above the head and in the body's centre plane.
     let minY = Infinity, maxY = -Infinity, sumD = 0;

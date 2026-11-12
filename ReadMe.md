@@ -13,6 +13,12 @@ This fork adds **GarmentCode 3D Studio**, a static, browser-only web app (in [`w
 * Starter templates, plain-language parameter names, an Essentials/All switch, search, and "Surprise me" randomisation with per-parameter locks.
 * Undo/redo, share links (the design is compressed into the URL), saved designs with thumbnails, and autosave, all stored in your browser.
 
+**FreeSewing designs**
+* Besides GarmentCode's programs, the app can drape designs from [FreeSewing](https://freesewing.eu) (MIT, by Joost De Cock and contributors). The first one is [Bruce](https://freesewing.eu/designs/bruce/) boxer briefs.
+* FreeSewing's own code drafts the pattern in your browser (bundled from `@freesewing/*` at build time). The app maps GarmentCode body measurements to FreeSewing's (Bruce's `hips` is measured on the mannequin at the top of the hip bone), shows the design's options as sliders, and converts the draft into sewn, placed panels ([`web/src/fs/`](web/src/fs/)).
+* Bruce is drafted with negative ease for stretch fabric. The cloth simulation barely stretches, so the drape uses a relaxed copy (no negative ease at the hips, a third of it at the legs). The pattern view, cutting layout and exports use the real pattern.
+* Adding another design takes a small adapter (measurement mapping, options, seam table, placement); see [`web/src/fs/bruce.js`](web/src/fs/bruce.js).
+
 **Body**
 * Enter GarmentCode's 26 body measurements (cm or inches). The pattern is re-drafted to fit, and the mannequin morphs to match: height, landmark lines, bust/underbust/waist/hip girths, shoulders, arms and thighs, blended with GarmentCode's body segmentation.
 * Saved body profiles. YAML import and export compatible with GarmentCode.
@@ -48,7 +54,7 @@ The drape is a lightweight real-time approximation, **not** the NVIDIA Warp simu
 ### Run locally
 
 ```bash
-cd web && npm install          # three + three-mesh-bvh, used to precompute body data
+cd web && npm install          # three + three-mesh-bvh (body data), esbuild + @freesewing/* (FreeSewing bundle)
 npm run build                  # assembles ../_site (Python sources zip, body meshes, collision fields)
 npm run serve                  # http://localhost:8000
 ```
@@ -57,7 +63,7 @@ Deployment happens through [`.github/workflows/pages.yml`](.github/workflows/pag
 
 ### What's changed vs. upstream
 
-Only additions: `web/`, `.github/workflows/pages.yml`, `.gitignore` entries and this README section. The Python library and garment programs are untouched. The web port is distributed under the same MIT license as the original project.
+Only additions: `web/`, `.github/workflows/pages.yml`, `.gitignore` entries and this README section. The Python library and garment programs are untouched. The web port is distributed under the same MIT license as the original project. FreeSewing designs are MIT licensed by their authors (https://freesewing.eu); the bundle keeps their license notices.
 
 ---
 

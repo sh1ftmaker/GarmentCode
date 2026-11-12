@@ -189,6 +189,12 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 22px; }
 .tpl:hover { border-color: var(--line-strong); }
 .tpl.active { border-color: var(--accent); background: var(--accent-soft); }
 .tpl svg { width: 44px; height: 54px; color: var(--ink-2); }
+.tpl-sep {
+  flex: none; writing-mode: vertical-rl; transform: rotate(180deg); align-self: stretch; text-align: center;
+  font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); border-right: 1px solid var(--line); padding: 0 4px 0 2px;
+}
+.fs-note { font-size: 12.5px; line-height: 1.45; color: var(--ink-2); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; margin-bottom: 10px; }
+.fs-note a { color: inherit; }
 
 /* fabric */
 .fabric-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; margin-bottom: 8px; }
