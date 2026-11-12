@@ -9,6 +9,7 @@ export const name = 'Bruce boxer briefs';
 export const short = 'Boxer briefs';
 export const exportName = 'Bruce';               // class exported by the FreeSewing bundle
 export const url = 'https://freesewing.eu/designs/bruce/';
+export const author = 'Joost De Cock';
 export const icon = 'M8 10h40l-2 14c-1 9-5 16-11 20l-7-2-7 2c-6-4-10-11-11-20z';
 export const stretchNote = 'Bruce is drafted with negative ease for stretch knits. The 3D drape uses a relaxed copy (no negative ease at the hips, a third of it at the legs) because the simulated cloth barely stretches; the pattern view, cutting layout and exports use the real pattern.';
 

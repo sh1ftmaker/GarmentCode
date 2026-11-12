@@ -1,6 +1,6 @@
 /*! FreeSewing designs for GarmentCode 3D Studio (bundled by web/tools/build_site.sh).
  *
- * @freesewing/core, @freesewing/bruce and their @freesewing/* plugins
+ * @freesewing/core, the @freesewing/* designs (bruce, hugo, ...) and their @freesewing/* plugins
  *   https://freesewing.eu - MIT License, Copyright (c) Joost De Cock and contributors
  *   (@freesewing/plugin-transform: Wouter van Wageningen)
  * bezier-js - MIT License, Copyright (c) Pomax
@@ -25,4 +25,8 @@
 // To add a design: npm install --save-dev --save-exact @freesewing/<design>, export its
 // class here, and add an adapter in src/fs/ (see src/fs/bruce.js).
 export { Bruce } from '@freesewing/bruce';
+export { Hugo } from '@freesewing/hugo';
+export { Teagan } from '@freesewing/teagan';
+export { Sven } from '@freesewing/sven';
+export { Aaron } from '@freesewing/aaron';
 export { version } from '@freesewing/core';
