@@ -44,8 +44,8 @@ export function meshPanel(boundary, h, grain = null) {
   }
   const pts = boundary.map(p => [p[0], p[1]]);
   const keep2 = (0.6 * h) ** 2;
-  // same vertex density either way (hexagonal cell 0.866 h², square cell a²)
-  const sq = !!grain, a = sq ? 0.93 * h : h;
+  // square cells of side h (slightly fewer points than the hexagonal lattice's 0.866 h² cells)
+  const sq = !!grain, a = h;
   const dy = sq ? a : h * Math.sqrt(3) / 2;
   // lattice phase anchored at the origin of the frame, so neighbouring pieces line up alike
   const y0 = sq ? Math.ceil(minY / dy) * dy + dy / 2 : minY + dy / 2;
@@ -59,7 +59,13 @@ export function meshPanel(boundary, h, grain = null) {
         const p = B[i], q = B[(i + 1) % n];
         if (distToSegSq(x, y, p[0], p[1], q[0], q[1]) < keep2) ok = false;
       }
-      if (ok) pts.push(fromL(x, y));
+      if (!ok) continue;
+      if (sq) {
+        // a small fixed jitter breaks the square lattice's co-circular points, so the
+        // diagonals Delaunay picks point both ways (the hinge stiffness stays even)
+        const r = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453, s = Math.sin(x * 39.346 + y * 11.135) * 24634.6345;
+        pts.push(fromL(x + (r - Math.floor(r) - 0.5) * 0.16 * a, y + (s - Math.floor(s) - 0.5) * 0.16 * a));
+      } else pts.push(fromL(x, y));
     }
   }
   const flat = new Float64Array(pts.length * 2);

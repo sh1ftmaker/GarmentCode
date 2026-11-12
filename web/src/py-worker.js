@@ -48,7 +48,7 @@ const handlers = {
   designYaml() { return call('gc.design_yaml()'); },
   bodyYaml() { return call('gc.body_yaml()'); },
   specJson() { return call('gc.spec_json()'); },
-  svg() { return call('gc.svg()'); },
+  svg({ grains }) { return call(`gc.svg(${s(grains || {})})`); },
 };
 
 onmessage = async (e) => {

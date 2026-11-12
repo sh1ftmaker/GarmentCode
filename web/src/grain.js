@@ -55,7 +55,8 @@ function capSide(p, data) {
 /** Straight (lengthwise) grain of a panel in its pattern coordinates. */
 export function straightGrain(p, data) {
   if (Array.isArray(p.grain) && (p.grain[0] || p.grain[1])) return norm2(p.grain);
-  if (p.label === 'arm' && gcFrame(p)) return [capSide(p, data), 0];
+  // sleeve panels, not bands around the arm (a cuff's circumference is its local x as well)
+  if (p.label === 'arm' && gcFrame(p) && !isRib(p, data)) return [capSide(p, data), 0];
   return [0, 1];
 }
 
@@ -93,11 +94,18 @@ export function panelGrain(p, mode, data) {
 }
 
 /**
- * Ribbing bands of FreeSewing knit tops (waistband, cuffs, bindings) are cut from rib knit,
- * which stretches mostly crosswise, whatever the main fabric. GarmentCode waistbands and
- * cuffs are made of the garment's own fabric.
+ * Ribbing bands are cut from rib knit, which stretches mostly crosswise, whatever the main
+ * fabric: the bands of FreeSewing knit tops (waistband, cuffs, bindings), GarmentCode's hem
+ * band (hoodies, sweatshirts), and GarmentCode cuff bands of a garment with a hem band or of
+ * trousers (joggers). Other GarmentCode waistbands and cuffs are of the garment's fabric.
  */
-export const isRib = (p) => (p.rib != null ? !!p.rib : !gcFrame(p) && /waistband|cuff|binding|ribbing/.test(p.name));
+export function isRib(p, data) {
+  if (p.rib != null) return !!p.rib;
+  if (!gcFrame(p)) return /waistband|cuff|binding|ribbing/.test(p.name);
+  if (/^hem_band/.test(p.name)) return true;
+  if (!/_cuff_[fb]$/.test(p.name)) return false;
+  return /^pant_/.test(p.name) || !!data?.panels?.some(q => /^hem_band/.test(q.name));
+}
 
 /**
  * Grain of every panel of a pattern export ({ panels, stitches }) for the design's grain
@@ -110,7 +118,7 @@ export function pieceGrains(data, grain) {
     // a cut-only extra layer (FreeSewing lining) follows its piece
     const base = p.name.replace(/_lining$/, '');
     const mode = grainMode(grain?.pieces?.[p.name] ? p.name : base, grain);
-    out[p.name] = { mode, vec: panelGrain(p, mode, data), rib: isRib(p) };
+    out[p.name] = { mode, vec: panelGrain(p, mode, data), rib: isRib(p, data) };
   }
   return out;
 }
