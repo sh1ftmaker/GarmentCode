@@ -74,6 +74,65 @@ design:
       - 1.6
       type: float
       default_prob: 0.4
+    # -- Web port additions (not in the original GarmentCode design space; off by default)
+    open_front:
+      v: false
+      range:
+      - true
+      - false
+      type: bool
+      default_prob: 0.9
+    hem_band:
+      enable:
+        v: false
+        range:
+        - true
+        - false
+        type: bool
+        default_prob: 0.8
+      depth:
+        v: 0.3
+        range:
+        - 0.1
+        - 0.6
+        type: float
+        default_prob: 0.5
+      fit:
+        v: 0.9
+        range:
+        - 0.7
+        - 1.0
+        type: float
+        default_prob: 0.5
+    pocket:
+      type:
+        v: null
+        range:
+        - KangarooPocket
+        - null
+        type: select_null
+        default_prob: 0.8
+      height:
+        v: 0.5
+        range:
+        - 0.3
+        - 0.7
+        type: float
+        default_prob: 0.5
+      width:
+        v: 0.75
+        range:
+        - 0.5
+        - 0.9
+        type: float
+        default_prob: 0.5
+      top_width:
+        v: 0.65
+        range:
+        - 0.4
+        - 0.9
+        type: float
+        default_prob: 0.5
   collar:
     f_collar:
       v: CircleNeckHalf

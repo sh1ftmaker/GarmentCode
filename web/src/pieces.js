@@ -4,7 +4,8 @@
 import { pieceGrains } from './grain.js';
 
 const TOKENS = [
-  [/ins_skirt_front/, 'godet front'], [/ins_skirt_back/, 'godet back'], [/ftorso/, 'front bodice'], [/btorso/, 'back bodice'], [/sleeve_f/, 'sleeve front'], [/sleeve_b/, 'sleeve back'],
+  [/ins_skirt_front/, 'godet front'], [/ins_skirt_back/, 'godet back'], [/ftorso_lower/, 'lower front bodice'],
+  [/pocket/, 'pocket'], [/hem_band/, 'hem band'], [/ftorso/, 'front bodice'], [/btorso/, 'back bodice'], [/sleeve_f/, 'sleeve front'], [/sleeve_b/, 'sleeve back'],
   [/collar_front/, 'collar front'], [/collar_back/, 'collar back'], [/wb_front/, 'waistband front'],
   [/wb_back/, 'waistband back'], [/pant_f/, 'pants front'], [/pant_b/, 'pants back'], [/skirt_front/, 'skirt front'],
   [/skirt_back/, 'skirt back'], [/hood/, 'hood'], [/cuff/, 'cuff'], [/lapel/, 'lapel'], [/turtle/, 'turtleneck'],
@@ -30,7 +31,7 @@ function category(raw) {
   if (/torso/.test(raw)) return 0;
   if (/collar|hood|lapel|turtle/.test(raw)) return 1;
   if (/sleeve|cuff/.test(raw) && !/pant/.test(raw)) return 2;
-  if (/wb_/.test(raw)) return 3;
+  if (/wb_|hem_band/.test(raw)) return 3;
   if (/skirt|pant|godet|level/.test(raw)) return 4;
   return 5;
 }
