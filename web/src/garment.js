@@ -157,6 +157,10 @@ function wrapPanel(P, n0, axis, rMin = 9) {
   // only wrap panels that face the axis (e.g. not collar pieces placed off to the side)
   const uc = (uMin + uMax) / 2;
   if (Math.abs(uc) > Math.max(dMean, 12) * 0.9 || uMin > dMean + 5 || uMax < -dMean - 5) return false;
+  // Narrow panels that GarmentCode already arranged in a ring around the axis (e.g. a
+  // 15-gore skirt) are facets of that ring: bending each one to a quarter turn would
+  // collapse it into the body.
+  if ((uMax - uMin) / 2 < 0.6 * dMean) return false;
   // per-slice half-width -> radius
   const BIN = 2, nb = Math.max(1, Math.ceil((tMax - tMin) / BIN) + 1);
   const wb = new Float32Array(nb);
@@ -219,7 +223,14 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = 7 } = {})
     const flat = new Float32Array(P);
     const kind = panelKind(p.label);
     const n0 = [R[0][2], R[1][2], R[2][2]];
-    if (kind !== ARM) wrapPanel(P, n0, BODY_AXIS);
+    // One-leg panels (trousers) wrap around their own leg, everything else around the torso.
+    let xMin = Infinity, xMax = -Infinity;
+    for (let i = 0; i < P.length; i += 3) { xMin = Math.min(xMin, P[i]); xMax = Math.max(xMax, P[i]); }
+    const oneLeg = kind === LEG && (xMin > -3 || xMax < 3) && /pant|leg/.test(p.name);
+    if (oneLeg) {
+      const xc = (xMin + xMax) / 2;
+      wrapPanel(P, n0, { c: [xc, 0, BODY_AXIS.c[2]], a: BODY_AXIS.a }, 7);
+    } else if (kind !== ARM) wrapPanel(P, n0, BODY_AXIS);
     else if (armAxes) {   // sleeves: wrap around the arm on the panel's side
       let mx = 0; for (let i = 0; i < P.length; i += 3) mx += P[i];
       const ax = mx >= 0 ? armAxes.pos : armAxes.neg;
