@@ -1,6 +1,7 @@
 // Panel meshing and a small XPBD cloth solver that sews GarmentCode panels
 // together around the body. All units are centimeters (GarmentCode units).
 import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+import { pieceGrains, edgeWarp, edgeCompliance } from './grain.js';
 
 // ---------------------------------------------------------------------------
 // 2D helpers
@@ -357,7 +358,8 @@ function placeSkirtRing(panels, stitches) {
 }
 
 /** Build the simulation-ready garment from the exported GarmentCode pattern. */
-export function buildGarment(pattern, h, sdf, { armAxes = null, lift = 7 } = {}) {
+export function buildGarment(pattern, h, sdf, { armAxes = null, lift = 7, grain = null } = {}) {
+  const grains = pieceGrains(pattern, grain);   // grain direction per panel (grain.js)
   // 1. mesh + place every panel
   const panels = pattern.panels.map((p, pi) => {
     const { pts, tris } = meshPanel(p.boundary, h);
@@ -393,7 +395,7 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = 7 } = {})
     const flat = new Float32Array(P);
     const kind = panelKind(p.label);
     const n0 = [R[0][2], R[1][2], R[2][2]];
-    return { p, pi, pts, tris, P, flat, kind, n0, R };
+    return { p, pi, pts, tris, P, flat, kind, n0, R, gv: grains[p.name].vec };
   });
   if (armAxes) alignSleeves(panels, armAxes);
   const ring = new Set(placeSkirtRing(panels, pattern.stitches));
@@ -445,7 +447,8 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = 7 } = {})
       const v = remap[q.base + i];
       positions[3 * v] += q.P[3 * i]; positions[3 * v + 1] += q.P[3 * i + 1]; positions[3 * v + 2] += q.P[3 * i + 2];
       flat[3 * v] += q.flat[3 * i]; flat[3 * v + 1] += q.flat[3 * i + 1]; flat[3 * v + 2] += q.flat[3 * i + 2];
-      if (cnt[v] === 0) { uvs[2 * v] = x / 25; uvs[2 * v + 1] = y / 25; panelOf[v] = q.pi; kind[v] = q.kind; axisOf[v] = q.axis; }
+      // texture coordinates in the grain frame (v along the warp), so a print follows the cut
+      if (cnt[v] === 0) { uvs[2 * v] = (x * q.gv[1] - y * q.gv[0]) / 25; uvs[2 * v + 1] = (x * q.gv[0] + y * q.gv[1]) / 25; panelOf[v] = q.pi; kind[v] = q.kind; axisOf[v] = q.axis; }
       else { seamVert[v] = 1; kind[v] = Math.min(kind[v], q.kind) === ARM ? ARM : Math.max(kind[v], q.kind); }
       cnt[v]++;
     });
@@ -453,7 +456,7 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = 7 } = {})
   for (let v = 0; v < nv; v++) for (let c = 0; c < 3; c++) { positions[3 * v + c] /= cnt[v]; flat[3 * v + c] /= cnt[v]; }
 
   // 3. triangles, stretch edges and bending pairs (rest state from the 2D pattern)
-  const index = [], stretch = [], stretchRest = [], bend = [], bendRest = [], seamBend = [], seamBendRest = [];
+  const index = [], stretch = [], stretchRest = [], stretchWarp = [], bend = [], bendRest = [], seamBend = [], seamBendRest = [];
   const edgeSeen = new Map();
   for (const q of panels) {
     const d2 = (a, b) => Math.hypot(q.pts[a][0] - q.pts[b][0], q.pts[a][1] - q.pts[b][1]);
@@ -469,6 +472,8 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = 7 } = {})
         if (prev === undefined) {
           edgeSeen.set(key, { panel: q.pi, opp: loc[(e + 2) % 3], q, la: loc[e], lb: loc[(e + 1) % 3], ga: a, si: stretchRest.length });
           stretch.push(a, b); stretchRest.push(d2(loc[e], loc[(e + 1) % 3]));
+          const pa = q.pts[loc[e]], pb = q.pts[loc[(e + 1) % 3]];
+          stretchWarp.push(edgeWarp(q.gv, pb[0] - pa[0], pb[1] - pa[1]));   // angle to the grain
         } else if (prev && prev.panel === q.pi) {
           bend.push(remap[q.base + prev.opp], glob[(e + 2) % 3]);
           bendRest.push(d2(prev.opp, loc[(e + 2) % 3]));
@@ -533,7 +538,8 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = 7 } = {})
     positions, flat, uvs, panelOf, kind, seamVert, seamLines: new Uint32Array(seamLines),
     index: nv > 65535 ? new Uint32Array(index) : new Uint16Array(index),
     armpitY: (levels.strapless_top || 130) - 2,
-    stretch: new Uint32Array(stretch), stretchRest: new Float32Array(stretchRest),
+    stretch: new Uint32Array(stretch), stretchRest: new Float32Array(stretchRest), stretchWarp: new Float32Array(stretchWarp),
+    grain: Object.fromEntries(panels.map(q => [q.p.name, grains[q.p.name]])),
     bend: new Uint32Array(bend.concat(seamBend)), bendRest: new Float32Array(bendRest.concat(seamBendRest)),
     seamBendCount: seamBend.length / 2,
     attach: new Uint32Array(attach), attachY: new Float32Array(attachY),
@@ -785,7 +791,8 @@ export class ClothSim {
     this.cpush = new Float32Array(g.nv);      // last contact correction depth (0 = no contact)
     this.opts = Object.assign({
       substeps: 12, stretchIters: 2, gravity: 981, thickness: 0.6, friction: 0.5,
-      bendCompliance: 2e-6, stretchCompliance: 0, damping: 0.8, seamBendFactor: 0.15,
+      // stretch compliance along the warp; weft / bias default to the same (isotropic cloth)
+      bendCompliance: 2e-6, stretchCompliance: 0, weftCompliance: null, biasCompliance: null, damping: 0.8, seamBendFactor: 0.15,
       zeroGravityFrames: 10,                       // as in GarmentCode's sim config
       relaxFrames: 30,                             // momentum-free settling of the sewn start state
       maxVelocity: 250,                            // cm/s clamp (GarmentCode: global_max_velocity)
@@ -818,6 +825,32 @@ export class ClothSim {
     return Math.min(0.99, this.t / target);
   }
 
+  /** Per-constraint stretch compliance (/dt²) from each edge's angle to its panel's grain. */
+  _stretchAlpha(dt) {
+    const o = this.opts, g = this.g;
+    const cw = o.stretchCompliance, cf = o.weftCompliance ?? cw, cb = o.biasCompliance ?? cw;
+    const key = `${cw}|${cf}|${cb}|${dt}`;
+    if (this._alphaKey === key) return this._alpha;
+    const n = g.stretchRest.length, w = g.stretchWarp, inv = 1 / (dt * dt);
+    const a = this._alpha && this._alpha.length === n ? this._alpha : new Float32Array(n);
+    for (let c = 0; c < n; c++) a[c] = edgeCompliance(w ? w[c] : 1, cw, cf, cb) * inv;
+    this._alpha = a; this._alphaKey = key;
+    return a;
+  }
+
+  _solveStretch(idx, rest, alpha) {   // _solveDist with one compliance per constraint
+    const x = this.x;
+    for (let c = 0; c < idx.length; c += 2) {
+      const a = 3 * idx[c], b = 3 * idx[c + 1];
+      const dx = x[b] - x[a], dy = x[b + 1] - x[a + 1], dz = x[b + 2] - x[a + 2];
+      const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (len < 1e-9) continue;
+      const corr = (len - rest[c >> 1]) / len / (2 + alpha[c >> 1]);
+      x[a] += dx * corr; x[a + 1] += dy * corr; x[a + 2] += dz * corr;
+      x[b] -= dx * corr; x[b + 1] -= dy * corr; x[b + 2] -= dz * corr;
+    }
+  }
+
   _solveDist(idx, rest, alpha) {
     const x = this.x;
     for (let c = 0; c < idx.length; c += 2) {
@@ -837,7 +870,7 @@ export class ClothSim {
     const dt = frameDt / o.substeps;
     const x = this.x, p = this.p, v = this.v, sdf = this.sdf, grad = this._g;
     const bendAlpha = o.bendCompliance / (dt * dt);
-    const stretchAlpha = o.stretchCompliance / (dt * dt);
+    const stretchAlpha = this._stretchAlpha(dt);
     const gy = this.frame < Math.max(o.zeroGravityFrames, o.relaxFrames) ? 0 : -o.gravity * dt;
     const damp = Math.max(0, 1 - o.damping * dt);
     for (let sub = 0; sub < o.substeps; sub++) {
@@ -863,7 +896,7 @@ export class ClothSim {
         }
         x[i] += v[i] * dt; x[i + 1] += v[i + 1] * dt; x[i + 2] += v[i + 2] * dt;
       }
-      for (let k = 0; k < o.stretchIters; k++) this._solveDist(g.stretch, g.stretchRest, stretchAlpha);
+      for (let k = 0; k < o.stretchIters; k++) this._solveStretch(g.stretch, g.stretchRest, stretchAlpha);
       // regular bending, then seams (seam allowances make the seam line stiffer than the cloth)
       const k0 = g.bendRest.length - (g.seamBendCount || 0);
       this._solveDist(g.bend.subarray(0, 2 * k0), g.bendRest.subarray(0, k0), bendAlpha);
