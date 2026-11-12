@@ -10,14 +10,18 @@
 //     { v, range, type, name, help }), options(), measurements() (GarmentCode cm ->
 //     FreeSewing mm), spec() (pieces: fold/mirror copies; seams: chains of edges by
 //     seam-path operation number; labels: waist edges -> 'lower_interface'),
-//     placement() ((x, y) on the piece -> 3D; hipSurface() covers lower-body pieces)
-//     and attachLevels().
+//     placement() ((x, y) on the piece -> 3D; hipSurface() in convert.js covers lower-body
+//     pieces, place.js the torso, arms, head and bands: see hugo.js) and attachLevels().
+//     Pieces that are hard to place alone (sleeve caps, hoods, bands) can `follow` the
+//     pieces they are sewn to. Tops built on Brian share tops.js (measurements, torso).
 //  3. Register it in FS_DESIGNS below. A template card appears under "FreeSewing".
 //  Check the seam table by drawing the converted panels with their stitches.
 import { convertDraft } from './convert.js';
 import * as bruce from './bruce.js';
+import * as hugo from './hugo.js';
+import * as teagan from './teagan.js';
 
-export const FS_DESIGNS = { bruce };
+export const FS_DESIGNS = { bruce, hugo, teagan };
 let vendor = null;
 const loadVendor = () => (vendor ||= import('./vendor/freesewing.js').catch((e) => {
   vendor = null;
@@ -32,7 +36,7 @@ async function draft(id, d, m, body, { relaxed = false, complete = false, sa = 0
   const A = FS_DESIGNS[id], lib = await loadVendor();
   const Design = lib[A.exportName];
   const fsm = A.measurements(m, body);
-  const pattern = new Design({ measurements: fsm, sa, complete, options: A.options(d, { relaxed }) }).draft();
+  const pattern = new Design({ ...(A.settings || {}), measurements: fsm, sa, complete, options: A.options(d, { relaxed }) }).draft();
   const logs = pattern.store.logs || {};
   return { pattern, fsm, warnings: [...(logs.warn || []), ...(logs.error || [])] };
 }
@@ -52,6 +56,7 @@ export async function fsPattern(id, d, m, body, { res = 1.5, drape = true } = {}
     layers: !drape,
   });
   out.warnings = warnings;
+  if (A.lift != null) out.lift = A.lift;   // how far above its placement the drape starts (garment.js)
   out.fs = { design: A.name, measurements: fsm, options: o };
   return out;
 }
@@ -75,7 +80,7 @@ export async function fsSVG(id, d, m, body) {
 /** FreeSewing settings (design, measurements in mm, options) for the "specification" export. */
 export async function fsSettings(id, d, m, body) {
   const A = FS_DESIGNS[id], lib = await loadVendor();
-  return { design: `@freesewing/${id}`, version: lib.version, measurements: A.measurements(m, body), options: A.options(d), sa: 0 };
+  return { design: `@freesewing/${id}`, version: lib.version, ...(A.settings || {}), measurements: A.measurements(m, body), options: A.options(d), sa: 0 };
 }
 
 /** Random values inside each option's range (locked paths keep theirs). */
@@ -84,7 +89,9 @@ export function fsRandomize(d, locked = new Set()) {
   const walk = (node, path) => {
     for (const [k, v] of Object.entries(node)) {
       const p = [...path, k];
-      if (v && typeof v === 'object' && 'v' in v && 'range' in v) {
+      if (v && typeof v === 'object' && v.type === 'bool') {
+        if (!locked.has(p.join('.'))) v.v = Math.random() < 0.5;
+      } else if (v && typeof v === 'object' && 'v' in v && 'range' in v) {
         if (locked.has(p.join('.'))) continue;
         const [lo, hi] = v.range;
         v.v = v.type === 'int' ? Math.round(lo + Math.random() * (hi - lo)) : Math.round((lo + Math.random() * (hi - lo)) * 10) / 10;

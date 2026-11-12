@@ -7,10 +7,15 @@
     "serve": "python3 -m http.server 8000 --directory ../_site"
   },
   "devDependencies": {
+    "@freesewing/aaron": "4.10.2",
     "@freesewing/bruce": "4.10.2",
+    "@freesewing/charlie": "4.10.2",
     "@freesewing/config": "4.10.2",
     "@freesewing/core": "4.10.2",
+    "@freesewing/hugo": "4.10.2",
     "@freesewing/plugin-transform": "4.10.2",
+    "@freesewing/sven": "4.10.2",
+    "@freesewing/teagan": "4.10.2",
     "esbuild": "0.25.10",
     "three": "0.170.0",
     "three-mesh-bvh": "0.8.3"
