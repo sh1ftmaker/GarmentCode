@@ -2,7 +2,7 @@
 import { Viewer } from './viewer.js';
 import { py, onPyProgress } from './py.js';
 import { buildGarment, ClothSim, SDF } from './garment.js';
-import { parseBodyBin, prepareMorph, morphBody } from './body.js';
+import { parseBodyBin, prepareMorph, morphBody, measureGirth } from './body.js';
 import { MEASUREMENTS, MEASUREMENT_GROUPS, ANGLE_KEYS, groupName, paramName, paramHelp, valueName, ESSENTIAL } from './labels.js';
 import { TEMPLATES, applyTemplate } from './templates.js';
 import { FABRICS, SWATCHES, simParams } from './fabric.js';
@@ -75,13 +75,47 @@ const isPreset = () => {
   const p = defaults.presets[S.base];
   return p && Object.keys(p).every(k => Math.abs((S.measurements[k] ?? p[k]) - p[k]) < 1e-6);
 };
-let armAxes = null;
+let armAxes = null, bodyPos = null;
 function updateBodyMesh() {
   const b = bodies[S.base];
   if (!b) return;
   const pos = isPreset() ? b.base.pos : morphBody(b.prep, defaults.presets[S.base], S.measurements);
   viewer.setBody(pos, b.base.idx);
   armAxes = computeArmAxes(pos, b.base.part);
+  bodyPos = pos;
+}
+
+/**
+ * GarmentCode's trouser flare narrows the hem without looking at the leg, so short or
+ * strongly tapered legs can come out smaller than the leg they must go around. Woven
+ * cloth can't do that (the drape cuts into the leg), so say so.
+ */
+function tightLegOpening(pat) {
+  const b = bodies[S.base];
+  if (!b || !bodyPos) return null;
+  const legOnly = b.base.part.map(p => (p === 3 ? 0 : 9));   // left leg only, as "body" for measureGirth
+  let worst = null;
+  for (const side of ['r', 'l']) {
+    let hem = 0, hemY = Infinity;
+    for (const p of pat.panels) {
+      if (!new RegExp(`^pant_[fb]_${side}$`).test(p.name)) continue;
+      const ys = p.boundary.map(q => q[1]), ymin = Math.min(...ys);
+      for (const r of p.edge_ranges) {
+        const pts = r.map(i => p.boundary[i]);
+        if (pts.length < 2 || !pts.every(q => q[1] < ymin + 1.5)) continue;
+        for (let i = 1; i < pts.length; i++) hem += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+        hemY = Math.min(hemY, ymin * p.rotation[1][1] + p.translation[1]);
+      }
+    }
+    if (!hem || !isFinite(hemY)) continue;
+    // the leg is widest a little above the hem (calf / thigh): check the hem and up to 15 cm
+    // above, but not the foot (full-length trousers end at the floor)
+    const ankle = 0.07 * (S.measurements.height || 170);
+    let leg = 0;
+    for (let dy = 0; dy <= 15; dy += 3) leg = Math.max(leg, measureGirth(bodyPos, legOnly, Math.max(hemY, ankle) + dy, 0.8));
+    if (leg > 0 && hem < leg + 1 && (!worst || leg - hem > worst.leg - worst.hem)) worst = { hem, leg };
+  }
+  return worst;
 }
 /** Principal axis of each arm (centroid + direction pointing to the hand), for wrapping sleeves. */
 function computeArmAxes(pos, part) {
@@ -154,6 +188,8 @@ async function regenerate() {
   cut.key = '';
   const w = [];
   if (!pat.panels.length) w.push('Empty design: choose a top, waistband or bottom under “Garment”.');
+  const tight = tightLegOpening(pat);
+  if (tight) w.push(`The trouser legs are narrower than the leg (opening ${Math.round(tight.hem)} cm, leg ${Math.round(tight.leg)} cm), so they can't go on without stretch fabric and the drape cuts into the leg. Increase the flare or width.`);
   if (pat.self_intersecting) {
     const names = [...new Set((pat.intersecting_panels || []).map(n => pieceName(n).replace(/ \((left|right)\)$/, '')))];
     const list = names.map(n => n.toLowerCase()).join(' and ') || 'a panel';
