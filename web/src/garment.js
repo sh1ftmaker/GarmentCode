@@ -184,7 +184,7 @@ function wrapPanel(P, n0, axis, rMin = 9) {
 }
 
 /** Build the simulation-ready garment from the exported GarmentCode pattern. */
-export function buildGarment(pattern, h, sdf, { armAxes = null } = {}) {
+export function buildGarment(pattern, h, sdf, { armAxes = null, lift = 7 } = {}) {
   // 1. mesh + place every panel
   const panels = pattern.panels.map((p, pi) => {
     const { pts, tris } = meshPanel(p.boundary, h);
@@ -195,6 +195,27 @@ export function buildGarment(pattern, h, sdf, { armAxes = null } = {}) {
       P[3 * i + 1] = R[1][0] * x + R[1][1] * y + T[1];
       P[3 * i + 2] = R[2][0] * x + R[2][1] * y + T[2];
     });
+    // Some lone components (e.g. a waistband with nothing to attach to) come out of
+    // GarmentCode unplaced: far above the head and in the body's centre plane.
+    let minY = Infinity, maxY = -Infinity, sumD = 0;
+    for (let i = 0; i < P.length; i += 3) { minY = Math.min(minY, P[i + 1]); maxY = Math.max(maxY, P[i + 1]); }
+    const levels0 = pattern.attach_levels || {};
+    const bodyTop = (levels0.strapless_top || 130) + 60;
+    if (minY > bodyTop && levels0.lower_interface) {
+      const dy = levels0.lower_interface - maxY + 2;
+      for (let i = 1; i < P.length; i += 3) P[i] += dy;
+    }
+    for (let i = 0; i < P.length; i += 3) sumD += P[i + 2] - BODY_AXIS.c[2];
+    const zMean = sumD / (P.length / 3);
+    if (Math.abs(zMean) < 3 && Math.abs(R[2][2]) > 0.7) {   // in the centre plane: move it in front / behind
+      const back = /back|btorso|_b(_|$)/.test(p.name);
+      const dz = (back ? -18 : 18) - zMean;
+      for (let i = 2; i < P.length; i += 3) P[i] += dz;
+    }
+    // GarmentCode places shoulder seams ~3 cm below the shoulder surface; starting there,
+    // the out-of-body projection pushes straps sideways off the shoulder. Start a little
+    // higher and let gravity settle the garment onto the body instead.
+    for (let i = 1; i < P.length; i += 3) P[i] += lift;
     const flat = new Float32Array(P);
     const kind = panelKind(p.label);
     const n0 = [R[0][2], R[1][2], R[2][2]];
@@ -423,7 +444,7 @@ export class ClothSim {
       zeroGravityFrames: 10,                       // as in GarmentCode's sim config
       relaxFrames: 30,                             // momentum-free settling of the sewn start state
       maxVelocity: 250,                            // cm/s clamp (GarmentCode: global_max_velocity)
-      attachStiffness: 0.06, attachFrames: 400, releaseAttachments: false,   // one-sided: only ever lifts
+      attachStiffness: 1, collarStiffness: 0.06, attachFrames: 400, releaseAttachments: false,
       maxDuration: 14, settleSpeed: 2.0, minDuration: 2.0, frictionScale: 1,
     }, opts);
     this.reset();
@@ -497,13 +518,16 @@ export class ClothSim {
       if (g.seamBendCount) this._solveDist(g.bend.subarray(2 * k0), g.bendRest.subarray(k0), bendAlpha * o.seamBendFactor);
 
       if (this.t < this.attachEnd) {
+        // Waist / strapless lines: a one-sided floor (an edge may settle down to the line, never
+        // below it). A soft spring loses against the stiff cloth constraints once a heavy skirt
+        // hangs from it, and the whole garment slides off.
         const ak = o.attachStiffness;
         const at = g.attach, ay = g.attachY;
         for (let c = 0; c < at.length; c++) { const i = 3 * at[c] + 1; if (x[i] < ay[c]) x[i] += (ay[c] - x[i]) * ak; }
         const cl = g.collar, cx = g.collarX;
         for (let c = 0; c < cl.length; c++) {
           const i = 3 * cl[c], lim = cx[c];
-          if (lim < 0 ? x[i] < lim : x[i] > lim) x[i] += (lim - x[i]) * ak;
+          if (lim < 0 ? x[i] < lim : x[i] > lim) x[i] += (lim - x[i]) * o.collarStiffness;
         }
       } else if (this.releaseY === null) {
         this.releaseY = this.topY();

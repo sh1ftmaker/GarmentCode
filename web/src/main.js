@@ -156,6 +156,19 @@ function startDrape() {
     status(pattern && !pattern.panels.length ? 'Empty design' : 'Ready');
     return;
   }
+  // GarmentCode occasionally drafts degenerate geometry for extreme combinations
+  // (e.g. a metres-wide panel). Don't pretend to drape it.
+  const huge = pattern.panels.find(p => {
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const [x, y] of p.boundary) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    return x1 - x0 > 320 || y1 - y0 > 320;
+  });
+  if (huge) {
+    viewer.clearGarment();
+    status('Invalid pattern');
+    warn(`GarmentCode produced invalid geometry for this combination (panel “${huge.name}” is several metres across). Try other parameters or body measurements.`);
+    return;
+  }
   const g = buildGarment(pattern, S.fabric.res, sdf, { armAxes });
   viewer.setGarment(g);
   sim = new ClothSim(g, sdf, { ...simParams(S.fabric), releaseAttachments: S.fabric.release });
