@@ -405,7 +405,7 @@ function renderFSDesignUI(root) {
   const A = FS_DESIGNS[S.source];
   root.append(el('div', { class: 'fs-note' },
     el('b', {}, A.name), ' · a ', el('a', { href: A.url, target: '_blank', rel: 'noopener' }, 'FreeSewing'),
-    ' design (MIT), drafted in your browser from your measurements. ', A.stretchNote));
+    ` design${A.author ? ` by ${A.author}` : ''} (MIT), drafted in your browser from your measurements. `, A.stretchNote));
   const q = S.search.trim().toLowerCase();
   for (const [g, node] of Object.entries(S.design)) {
     const body = el('div', { class: 'gbody' });

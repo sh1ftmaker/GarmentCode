@@ -27,4 +27,6 @@
 export { Bruce } from '@freesewing/bruce';
 export { Hugo } from '@freesewing/hugo';
 export { Teagan } from '@freesewing/teagan';
+export { Sven } from '@freesewing/sven';
+export { Aaron } from '@freesewing/aaron';
 export { version } from '@freesewing/core';

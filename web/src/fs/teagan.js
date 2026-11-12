@@ -37,26 +37,28 @@ const MEASUREMENTS = ['biceps', 'chest', 'hpsToBust', 'hpsToWaistBack', 'neck', 
 export const measurements = (m, body) => pick(brianMeasurements(m, body), MEASUREMENTS);
 
 /*
- * Edges: front/back (cut on the fold, 6 = centre): 0 hem (centre -> side), 1 side seam (up),
+ * Edges: front/back (cut on the fold, 6 = centre): 0 hem (centre -> side), 1 side seam (up; with a
+ *   fitted waist 1-2, and every later edge one up),
  *   2-3 armhole (side -> shoulder), 4 shoulder seam (shoulder -> neck), 5 neckline (-> centre)
  * sleeve: 0 hem (front -> back), 1 back underarm (up), 2-6 cap (back -> front), 7 front underarm (down)
  * The front's local +x, the back's mirrored half and the unmirrored sleeve are the wearer's left.
  */
-export function spec() {
+export function spec(o) {
+  const w = o.fitWaist ? 1 : 0;   // a fitted waist splits the side seam in two (edges 1-2), the rest move up by one
   const seams = [];
   for (const s of [1, -1]) {
     const f = (k) => (s > 0 ? String(k) : 'm' + k), b = (k) => (s > 0 ? 'm' + k : String(k)), sl = s > 0 ? 'sleeve_l' : 'sleeve_r';
     seams.push(
-      { a: [['front', f(1)]], b: [['back', b(1)]] },
-      { a: [['front', f(4)]], b: [['back', b(4)]] },
-      { a: [['back', b(2)], ['back', b(3)], ['front', f(3), true], ['front', f(2), true]], b: [[sl, 2], [sl, 3], [sl, 4], [sl, 5], [sl, 6]] },
+      { a: [['front', f(1)], ...(w ? [['front', f(2)]] : [])], b: [['back', b(1)], ...(w ? [['back', b(2)]] : [])] },
+      { a: [['front', f(4 + w)]], b: [['back', b(4 + w)]] },
+      { a: [['back', b(2 + w)], ['back', b(3 + w)], ['front', f(3 + w), true], ['front', f(2 + w), true]], b: [[sl, 2], [sl, 3], [sl, 4], [sl, 5], [sl, 6]] },
       { a: [[sl, 1]], b: [[sl, 7, true]] },
     );
   }
   return {
     pieces: [
-      { name: 'front', part: 'teagan.front', fold: 6, label: 'body' },
-      { name: 'back', part: 'teagan.back', fold: 6, label: 'body' },
+      { name: 'front', part: 'teagan.front', fold: 6 + w, label: 'body' },
+      { name: 'back', part: 'teagan.back', fold: 6 + w, label: 'body' },
       { name: 'sleeve_l', part: 'teagan.sleeve', label: 'arm', follow: 12 },
       { name: 'sleeve_r', part: 'teagan.sleeve', mirror: true, label: 'arm', follow: 12 },
     ],
@@ -68,7 +70,7 @@ export function spec() {
 export function placement(draft, m, body) {
   const parts = draft.parts[0];
   const F = upperFrame(body, m);
-  const T = brianTorso(F, parts['teagan.front'], parts['teagan.back'], { shoulderEdge: 4 });
+  const T = brianTorso(F, parts['teagan.front'], parts['teagan.back'], { shoulderEdge: draft.settings[0].options.fitWaist ? 5 : 4 });
   const sleeves = brianSleeves(F, parts['teagan.sleeve']);
   return (ps) => {
     if (ps.name === 'front') return T.front;

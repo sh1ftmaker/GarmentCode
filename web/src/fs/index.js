@@ -20,8 +20,10 @@ import { convertDraft } from './convert.js';
 import * as bruce from './bruce.js';
 import * as hugo from './hugo.js';
 import * as teagan from './teagan.js';
+import * as sven from './sven.js';
+import * as aaron from './aaron.js';
 
-export const FS_DESIGNS = { bruce, hugo, teagan };
+export const FS_DESIGNS = { bruce, hugo, teagan, sven, aaron };
 let vendor = null;
 const loadVendor = () => (vendor ||= import('./vendor/freesewing.js').catch((e) => {
   vendor = null;

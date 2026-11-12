@@ -115,6 +115,39 @@ function ringAt(S, a, s, g, sx) {
 const halfLen = (S) => 0.5 * (S.arcP[NB / 2] + S.arcN[NB / 2]);
 
 /**
+ * Half ring (front -> back on side sx) around a section, inflated by gap and widened to a
+ * garment half girth G: extra girth goes mostly into depth (front / back), little into width,
+ * so loose garments don't start out in the arms. Returns { half, at(a) -> [x, z] }.
+ */
+function wideRing(S, G, g, sx) {
+  const n = NB / 2;
+  const build = (kx, kz) => {
+    const pts = [], cum = [0];
+    for (let k = 0; k <= n; k++) {
+      const ph = sx * Math.PI * k / n, r = radiusAt(S, ph);
+      pts.push([S.xc + (r * kx + g) * Math.sin(ph), S.zc + (r * kz + g) * Math.cos(ph)]);
+      if (k) cum.push(cum[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]));
+    }
+    return { pts, cum, half: cum[n] };
+  };
+  let R = build(1, 1);
+  if (G > R.half) {
+    const kx = 1 + 0.15 * (G / R.half - 1);
+    let lo = 1, hi = 4;
+    for (let it = 0; it < 18; it++) { const mid = (lo + hi) / 2; if (build(kx, mid).half < G) lo = mid; else hi = mid; }
+    R = build(kx, hi);
+  }
+  R.at = (a) => {
+    let k = 1;
+    while (k < n && R.cum[k] < a) k++;
+    const f = clamp((a - R.cum[k - 1]) / ((R.cum[k] - R.cum[k - 1]) || 1), 0, 1);
+    const p = R.pts[k - 1], q = R.pts[k];
+    return [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f];
+  };
+  return R;
+}
+
+/**
  * Measure the mannequin for upper-body placement.
  * body: { pos, part } (morphed mannequin), m: GarmentCode measurements (cm).
  */
@@ -363,10 +396,9 @@ export function torsoMap(F, { side, xSign = 1, hps, slope = 0.35, girth, armhole
     const Yp = Yref + gap + (y - hps[1]) + o, Ytop = F.ridgeY(Xc) + gap - d + o;
     const Y = Yp + (Ytop - Yp) * (1 - sm(d / 20));
     const G = y >= armholeY - 0.5 ? Gtop : Math.max(1, girth(y) || Gtop);
-    const S = F.sec(Y), L0 = halfLen(S);
-    const half = Math.max(G, L0 + Math.PI * gap), s = (half - Math.PI * gap) / L0;
-    const arc = side > 0 ? ax * half / G : half - ax * half / G;
-    const [Xr, Zr] = ringAt(S, Math.max(0, arc), s, gap, sx);
+    const R = wideRing(F.sec(Y), G, gap, sx);
+    const arc = side > 0 ? ax * R.half / G : R.half - ax * R.half / G;
+    const [Xr, Zr] = R.at(Math.max(0, arc));
     // over the shoulder only: around the neck, below the shoulder and out at the side seams
     // the rings take over
     const wR = Math.max(sm((d - P.arc) / 8), 1 - neck, sm((ax - F.Xtip - 1) / 5) * sm((d - 4) / 6));
