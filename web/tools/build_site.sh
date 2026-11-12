@@ -10,6 +10,16 @@ cp "$ROOT/web/index.html" "$ROOT/web/sw.js" "$ROOT/web/manifest.webmanifest" "$R
 cp -r "$ROOT/web/src" "$OUT/src"
 touch "$OUT/.nojekyll"
 
+# FreeSewing designs (MIT, https://freesewing.eu) bundled for the browser; needs
+# `npm install` in web/ (the Pages workflow does that).
+ESBUILD="$ROOT/web/node_modules/.bin/esbuild"
+if [ -x "$ESBUILD" ] && [ -d "$ROOT/web/node_modules/@freesewing/core" ]; then
+  "$ESBUILD" "$ROOT/web/tools/freesewing-entry.mjs" --bundle --format=esm --minify \
+    --legal-comments=eof --log-level=warning --outfile="$OUT/src/fs/vendor/freesewing.js"
+else
+  echo "warning: web/node_modules is missing (run npm install in web/); FreeSewing designs will not load" >&2
+fi
+
 # Python sources (original GarmentCode library + garment programs + presets) for Pyodide
 python3 - "$ROOT" "$OUT/gc_py.zip" <<'PY'
 import sys, zipfile, pathlib
