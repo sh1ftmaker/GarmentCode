@@ -314,6 +314,8 @@ export function buildGarment(pattern, h, sdf, { armAxes = null } = {}) {
     }
   }
 
+  orientTriangles(index, nv, positions, sdf);
+
   const g = {
     nv,
     positions, flat, uvs, panelOf, kind, seamLines: new Uint32Array(seamLines),
@@ -327,6 +329,62 @@ export function buildGarment(pattern, h, sdf, { armAxes = null } = {}) {
   };
   if (sdf) projectOut(g, sdf, 1.0, 6);
   return g;
+}
+
+/**
+ * Make triangle winding consistent across the whole welded mesh (seams included) and
+ * facing away from the body. GarmentCode gives front and back panels the same normal,
+ * so without this the two sides of a seam face opposite ways and the shading breaks.
+ */
+function orientTriangles(index, nv, x, sdf) {
+  const nt = index.length / 3;
+  const edgeTris = new Map();
+  for (let t = 0; t < nt; t++) for (let e = 0; e < 3; e++) {
+    const a = index[3 * t + e], b = index[3 * t + (e + 1) % 3];
+    const k = a < b ? a * nv + b : b * nv + a;
+    const l = edgeTris.get(k);
+    if (l) l.push(t); else edgeTris.set(k, [t]);
+  }
+  const hasDir = (t, a, b) => {   // does triangle t traverse a->b ?
+    for (let e = 0; e < 3; e++) if (index[3 * t + e] === a && index[3 * t + (e + 1) % 3] === b) return true;
+    return false;
+  };
+  const flip = (t) => { const tmp = index[3 * t + 1]; index[3 * t + 1] = index[3 * t + 2]; index[3 * t + 2] = tmp; };
+  const done = new Uint8Array(nt), comp = new Int32Array(nt).fill(-1);
+  const comps = [];
+  for (let seed = 0; seed < nt; seed++) {
+    if (done[seed]) continue;
+    const ci = comps.length, members = [seed];
+    done[seed] = 1; comp[seed] = ci;
+    for (let q = 0; q < members.length; q++) {
+      const t = members[q];
+      for (let e = 0; e < 3; e++) {
+        const a = index[3 * t + e], b = index[3 * t + (e + 1) % 3];
+        for (const u of edgeTris.get(a < b ? a * nv + b : b * nv + a)) {
+          if (done[u]) continue;
+          if (hasDir(u, a, b)) flip(u);   // neighbour must traverse the shared edge b->a
+          done[u] = 1; comp[u] = ci; members.push(u);
+        }
+      }
+    }
+    comps.push(members);
+  }
+  // per connected piece: face away from the body (SDF gradient), or from the vertical axis
+  const grad = [0, 0, 0];
+  for (const members of comps) {
+    let score = 0;
+    for (const t of members) {
+      const A = 3 * index[3 * t], B = 3 * index[3 * t + 1], C = 3 * index[3 * t + 2];
+      const ux = x[B] - x[A], uy = x[B + 1] - x[A + 1], uz = x[B + 2] - x[A + 2];
+      const vx = x[C] - x[A], vy = x[C + 1] - x[A + 1], vz = x[C + 2] - x[A + 2];
+      const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const cx = (x[A] + x[B] + x[C]) / 3, cy = (x[A + 1] + x[B + 1] + x[C + 1]) / 3, cz = (x[A + 2] + x[B + 2] + x[C + 2]) / 3;
+      let ox = cx - BODY_AXIS.c[0], oy = 0, oz = cz - BODY_AXIS.c[2];
+      if (sdf && sdf.sample(cx, cy, cz, grad) < 30) { ox = grad[0]; oy = grad[1]; oz = grad[2]; }
+      score += Math.sign(nx * ox + ny * oy + nz * oz);
+    }
+    if (score < 0) for (const t of members) flip(t);
+  }
 }
 
 /** Collision filter, mirroring GarmentCode: lower garments ignore arms; torso below the armpit too. */

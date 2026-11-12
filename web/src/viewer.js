@@ -62,7 +62,7 @@ export class Viewer {
       color: 0xc9d6ea, roughness: 0.9, metalness: 0, side: THREE.DoubleSide,
       sheen: 0.3, sheenRoughness: 0.6, sheenColor: new THREE.Color(0xffffff),
     });
-    this.seamMat = new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22 });
+    this.seamMat = new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.12 });
     this.setPrint('plain');
 
     this.bodyMesh = null;
