@@ -676,7 +676,7 @@ export class ClothSim {
       attachStiffness: 1, collarStiffness: 0.06, attachFrames: 400, releaseAttachments: false,
       maxDuration: 14, settleSpeed: 2.0, minDuration: 2.0, frictionScale: 1,
       // cloth self-collision (Ten Minute Physics #15)
-      selfCollision: false, selfThickness: 1.4, selfFriction: 0.1, selfMargin: 1.5,
+      floorY: 0, selfCollision: false, selfThickness: 1.4, selfFriction: 0.1, selfMargin: 1.5,
       selfStartFrame: 0,                           // frames before self-collision starts
       selfMinInterval: 3,                          // min substeps between pair rebuilds (cost cap)
       selfMaxPairs: 3,                             // pair budget per particle before giving up
@@ -799,6 +799,17 @@ export class ClothSim {
         const push = th - d;
         cp[vi] = push;
         x[i] += grad[0] * push; x[i + 1] += grad[1] * push; x[i + 2] += grad[2] * push;
+      }
+      // floor (the mannequin stands at y = 0): long, full skirts pool on it instead of
+      // hanging below the feet and crumpling in mid-air
+      const fy = o.floorY + th;
+      for (let vi = 0; vi < n; vi++) {
+        const i = 3 * vi;
+        if (x[i + 1] >= fy) continue;
+        const push = fy - x[i + 1];
+        x[i + 1] = fy;
+        cn[i] = 0; cn[i + 1] = 1; cn[i + 2] = 0;
+        cp[vi] = Math.max(cp[vi], push, 1e-4);
       }
       const inv = 1 / dt;
       if (this.self) {
