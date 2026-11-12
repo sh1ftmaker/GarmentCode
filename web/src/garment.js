@@ -256,25 +256,32 @@ function alignSleeves(panels, armAxes) {
  * Returns the placed panel records (empty if the pattern has no such ring).
  */
 function placeSkirtRing(panels, stitches) {
-  const cand = panels.filter(q => q.kind === LEG && !q.p.map3d && q.p.labels && q.p.labels.lower_interface
-    && q.p.labels.lower_interface.length >= 2);
+  const cand = panels.filter(q => q.kind === LEG && !q.p.map3d);
   const N = cand.length;
   if (N < 3) return [];
-  // the candidates must form one cycle of side seams; collect each panel's two side seams
+  // the candidates must form one cycle of side seams; collect each panel's two side seams,
+  // and as its waist the edge labelled as such or, with a waistband, the edge sewn to it
   const idx = new Map(cand.map((q, i) => [q.p.name, i]));
-  const sides = cand.map(() => []);
+  const sides = cand.map(() => []), nbrs = cand.map(() => new Set()), sewn = cand.map(() => []);
   for (const s of stitches) {
     const a = idx.get(s.a), b = idx.get(s.b);
-    if (a === undefined || b === undefined || a === b) continue;
-    sides[a].push(s.ia); sides[b].push(s.ib);
+    if (a !== undefined && b !== undefined && a !== b) {
+      sides[a].push(s.ia); sides[b].push(s.ib); nbrs[a].add(b); nbrs[b].add(a);
+    } else if (a !== undefined && b === undefined) sewn[a].push(...s.ia);
+    else if (b !== undefined && a === undefined) sewn[b].push(...s.ib);
   }
-  if (sides.some(l => l.length !== 2)) return [];
+  if (sides.some(l => l.length !== 2) || nbrs.some(n => n.size !== 2)) return [];
+  const waist = cand.map((q, n) => {
+    const l = q.p.labels && q.p.labels.lower_interface;
+    return l && l.length >= 2 ? l : sewn[n];
+  });
+  if (waist.some(w => w.length < 2)) return [];
 
   const [cx, , cz] = BODY_AXIS.c;
   const info = [];
   for (let n = 0; n < N; n++) {
     const q = cand[n], { pts, p, P, R } = q, B = p.boundary;
-    const wl = p.labels.lower_interface;
+    const wl = waist[n];
     let wx = 0, wyy = 0; for (const i of wl) { wx += pts[i][0]; wyy += pts[i][1]; } wx /= wl.length; wyy /= wl.length;
     // side seams as lines (end to end); the one with the smaller x is "left"
     const lines = sides[n].map(l => {
