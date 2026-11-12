@@ -30,6 +30,20 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Build site
         run: bash web/tools/build_site.sh
+      # Experimental simulator branch, served at /lab/
+      - name: Check out sim-lab branch
+        id: lab
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          ref: sim-lab
+          path: lab-src
+      - name: Build lab site
+        if: steps.lab.outcome == 'success'
+        run: |
+          (cd lab-src/web && npm install --no-audit --no-fund)
+          bash lab-src/web/tools/build_site.sh
+          mv lab-src/_site _site/lab
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

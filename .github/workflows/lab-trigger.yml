@@ -1,0 +1,18 @@
+name: Redeploy Pages when sim-lab changes
+
+# Pages may only deploy from main, so a push to the experimental branch asks the
+# main workflow to rebuild (it builds sim-lab into /lab/).
+on:
+  push:
+    branches: [sim-lab]
+
+permissions:
+  actions: write
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - run: gh workflow run pages.yml --ref main --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ github.token }}
