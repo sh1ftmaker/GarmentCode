@@ -11,7 +11,7 @@ export const TEMPLATES = [
     'sleeve.sleeveless': false, 'sleeve.length': 1.0, 'sleeve.end_width': 0.7, 'sleeve.cuff.type': 'CuffBand',
     'sleeve.cuff.cuff_len': 0.1, 'collar.component.style': 'Hood2Panels', 'shirt.length': 1.75, 'shirt.width': 1.1,
     'shirt.hem_band.enable': true, 'shirt.pocket.type': 'KangarooPocket', 'shirt.open_front': true } },
-  { id: 'sweatshirt', name: 'Sweatshirt', set: {
+  { id: 'sweatshirt', name: 'Sweatshirt (GarmentCode)', set: {
     'sleeve.sleeveless': false, 'sleeve.length': 1.0, 'sleeve.end_width': 0.7, 'sleeve.cuff.type': 'CuffBand',
     'sleeve.cuff.cuff_len': 0.1, 'shirt.length': 1.6, 'shirt.width': 1.1, 'shirt.hem_band.enable': true } },
   { id: 'aline', name: 'A-line dress', set: {
@@ -33,8 +33,8 @@ export const TEMPLATES = [
     'meta.upper': null, 'meta.wb': 'StraightWB', 'meta.bottom': 'Pants', 'pants.width': 1.4, 'pants.length': 0.9,
     'pants.flare': 1.15 } },
   { id: 'joggers', name: 'Joggers', set: {
-    'meta.upper': null, 'meta.wb': 'StraightWB', 'meta.bottom': 'Pants', 'pants.length': 1.0, 'pants.width': 1.15,
-    'pants.flare': 0.85, 'pants.cuff.type': 'CuffBand', 'pants.cuff.cuff_len': 0.1 } },
+    'meta.upper': null, 'meta.wb': 'StraightWB', 'meta.bottom': 'Pants', 'pants.length': 0.95, 'pants.width': 1.1,
+    'pants.flare': 0.6, 'pants.cuff.type': 'CuffBand', 'pants.cuff.cuff_len': 0.08, 'pants.cuff.top_ruffle': 1.6 } },
   { id: 'shorts', name: 'Shorts', set: {
     'meta.upper': null, 'meta.wb': 'StraightWB', 'meta.bottom': 'Pants', 'pants.length': 0.3, 'pants.width': 1.1 } },
 ];
