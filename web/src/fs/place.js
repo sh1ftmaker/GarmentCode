@@ -59,6 +59,33 @@ export function armAxes(pos, part) {
   return out;
 }
 
+/** Lowest arm vertex (of part pid) within `touch` cm of a torso vertex, near armpit height Yarm: [x, y, z] or null. */
+function armpitCrease(pos, part, pid, Yarm, touch = 1.5) {
+  const cell = 2, key = (x, y, z) => `${Math.floor(x / cell)},${Math.floor(y / cell)},${Math.floor(z / cell)}`;
+  const grid = new Map();
+  for (let v = 0; v < part.length; v++) {
+    if (part[v] !== PART.BODY) continue;
+    const x = pos[3 * v], y = pos[3 * v + 1], z = pos[3 * v + 2];
+    if (Math.abs(x) < 8 || y < Yarm - 25 || y > Yarm + 6) continue;
+    const k = key(x, y, z);
+    if (grid.has(k)) grid.get(k).push(v); else grid.set(k, [v]);
+  }
+  let best = null;
+  for (let v = 0; v < part.length; v++) {
+    if (part[v] !== pid) continue;
+    const x = pos[3 * v], y = pos[3 * v + 1], z = pos[3 * v + 2];
+    if (y < Yarm - 25 || y > Yarm + 6 || (best && y >= best[1])) continue;
+    const gx = Math.floor(x / cell), gy = Math.floor(y / cell), gz = Math.floor(z / cell);
+    let hit = false;
+    for (let i = -1; i <= 1 && !hit; i++) for (let j = -1; j <= 1 && !hit; j++) for (let k = -1; k <= 1 && !hit; k++) {
+      const L = grid.get(`${gx + i},${gy + j},${gz + k}`);
+      if (L) for (const u of L) if (Math.hypot(pos[3 * u] - x, pos[3 * u + 1] - y, pos[3 * u + 2] - z) < touch) { hit = true; break; }
+    }
+    if (hit) best = [x, y, z];
+  }
+  return best;
+}
+
 // ------------------------------------------------------------------ body frame
 const NB = 72;   // directions per torso section
 
@@ -272,8 +299,13 @@ export function upperFrame(body, m) {
     const S = sec(Yarm);
     const pit = [S.xc + sx * radiusAt(S, sx * Math.PI / 2), Yarm, S.zc];
     const tPit = (pit[0] - c[0]) * a[0] + (pit[1] - c[1]) * a[1] + (pit[2] - c[2]) * a[2];
+    // the real armpit: the lowest point where the arm's skin meets the torso's. With the
+    // arms hanging down (A-pose) it is several cm below Yarm (a T-pose measurement), and
+    // anything placed between the two is inside the top of the arm.
+    const crease = armpitCrease(pos, part, pid, Yarm);
+    const tCrease = crease ? (crease[0] - c[0]) * a[0] + (crease[1] - c[1]) * a[1] + (crease[2] - c[2]) * a[2] : tPit;
     arms[sx] = {
-      c, a, up, fr, root: A.root, end: A.end, tPit,
+      c, a, up, fr, root: A.root, end: A.end, tPit, crease, tCrease,
       radius: (t) => rad[ki(t)],
       at: (t, r, dir) => {
         const k = ki(t), o = [CU[k] * up[0] + CF[k] * fr[0], CU[k] * up[1] + CF[k] * fr[1], CU[k] * up[2] + CF[k] * fr[2]];
@@ -337,13 +369,16 @@ export function distTo(polys) {
  *    when the piece is drawn as seen from outside); hps: [x, y] of the high point of the
  *    shoulder on the piece; slope: shoulder drop (cm per cm outwards from the HPS);
  *  girth(y): half girth of the garment at pattern height y (front + back half widths);
- *  armholeY: pattern height of the armhole bottom (side seam top).
+ *  armholeY: pattern height of the armhole bottom (side seam top);
+ *  armholeX, shoulderX (optional, set-in sleeves): pattern x of the armhole bottom and of the
+ *    shoulder point. With them, the armhole and the side under it start below the armpit
+ *    crease (by [H[J[3J cm), so the armhole ring goes around the arm, not through it.
  * Below the chest the piece wraps around a ring (the body section at that height, scaled
  * to the garment's girth, so front and back side seams meet). Near the top it lies over
  * the shoulder (a profile from the shoulder ridge down the front or back), so front and
  * back shoulder seams meet on the ridge. Points inside the body are pushed out radially.
  */
-export function torsoMap(F, { side, xSign = 1, hps, slope = 0.35, girth, armholeY, gap = 1.5 }) {
+export function torsoMap(F, { side, xSign = 1, hps, slope = 0.35, girth, armholeY, armholeX = null, shoulderX = null, gap = 1.5, clear = 3 }) {
   const topY = (ax) => hps[1] - slope * Math.max(0, ax - hps[0]);
   // shoulder profile per lateral offset: quarter ellipse from the ridge to the front / back wall
   const prof = new Map();
@@ -380,21 +415,39 @@ export function torsoMap(F, { side, xSign = 1, hps, slope = 0.35, girth, armhole
   // value for the whole piece (and its partner), so hems stay level and side seams meet
   const Yref = F.ridgeY(xh);
   const off = profile(Math.min(F.Xtip, 0.5 * (xh + F.Xtip))).off;
-  return (x, y) => {
+  // Under the arm: the armhole bottom has to start below the armpit crease (F.arms[sx].crease),
+  // or the armhole ring (and the sleeve sewn into it) starts inside the top of the arm and
+  // the drape leaves the arm sticking out through the cloth. When it would sit higher, the
+  // armhole and the side below it are moved down, fading out towards the shoulder point
+  // (shoulderX) and down the side seam.
+  const lower = armholeX != null && shoulderX != null && armholeX > shoulderX + 1;
+  const drop = {};
+  const map = (x, y, shift) => {
     const ax = Math.abs(x), sx = (x >= 0 ? 1 : -1) * xSign;
-    const d = topY(ax) - y;
+    // below the shoulder point (the armhole and the side), depth is measured from the shoulder
+    // point, not from the shoulder line carried on past it
+    const d = topY(lower ? Math.min(ax, shoulderX) : ax) - y;
+    let s = 0;
+    if (shift && lower) {
+      if (!(sx in drop)) {
+        const c = F.arms[sx] && F.arms[sx].crease;
+        drop[sx] = c ? Math.max(0, map(sx * xSign * armholeX, armholeY, false)[1] - (c[1] - clear)) : 0;
+      }
+      if (drop[sx] > 0) s = drop[sx] * sm((ax - shoulderX) / (armholeX - shoulderX)) * (1 - sm((armholeY - y) / 25));
+    }
     const Xc = Math.min(ax, F.Xtip);
     const pr = profile(Xc), P = pr[side];
     const neck = sm((ax - 0.4 * xn) / (0.8 * xn));    // 0 around the neck front / back, 1 beside the neck
     // over the shoulder
-    const [Yt, Zt] = onProfile(P, d);
+    let [Yt, Zt] = onProfile(P, d);
+    Yt -= s;
     // around the torso
     // near the top the ridge's own height at this X, further down the pattern's vertical (level hems)
     // (raised by `off` only near the top: lower down, e.g. at the armhole bottom, the pattern's
     // own height keeps the armhole under the arm)
     const o = off * (1 - sm((d - 4) / 14));
     const Yp = Yref + gap + (y - hps[1]) + o, Ytop = F.ridgeY(Xc) + gap - d + o;
-    const Y = Yp + (Ytop - Yp) * (1 - sm(d / 20));
+    const Y = Yp + (Ytop - Yp) * (1 - sm(d / 20)) - s;
     const G = y >= armholeY - 0.5 ? Gtop : Math.max(1, girth(y) || Gtop);
     const R = wideRing(F.sec(Y), G, gap, sx);
     const arc = side > 0 ? ax * R.half / G : R.half - ax * R.half / G;
@@ -409,6 +462,7 @@ export function torsoMap(F, { side, xSign = 1, hps, slope = 0.35, girth, armhole
     if (rr < lim && rr > 1e-6) { X = S2.xc + rx * lim / rr; Z = S2.zc + rz * lim / rr; }
     return [X, YY, Z];
   };
+  return (x, y) => map(x, y, true);
 }
 
 // ------------------------------------------------------------------ arms
@@ -420,15 +474,16 @@ export function torsoMap(F, { side, xSign = 1, hps, slope = 0.35, girth, armhole
  * The cap (above the biceps line) continues the tube towards the shoulder; it is meant
  * to be snapped onto the armhole (follow) afterwards.
  */
-export function sleeveMap(F, { sx, span, bicepsY, frontSign = -1, gap = 1.2 }) {
+export function sleeveMap(F, { sx, span, bicepsY, frontSign = -1, gap = 1.2, atCrease = false }) {
   const A = F.arms[sx];
   if (!A) return null;
+  const tPit = atCrease ? A.tCrease : A.tPit;
   const wAt = (y) => { const s = span(clamp(y, span.y0, span.y1)); return s ? [s[0], s[1]] : [-10, 10]; };
   const [bl, br] = wAt(bicepsY);
   return (x, y) => {
     let t, lo, hi;
-    if (y <= bicepsY) { t = A.tPit + (bicepsY - y); [lo, hi] = wAt(y); }
-    else { t = A.tPit - (y - bicepsY); lo = bl; hi = br; }
+    if (y <= bicepsY) { t = tPit + (bicepsY - y); [lo, hi] = wAt(y); }
+    else { t = tPit - (y - bicepsY); lo = bl; hi = br; }
     const W = Math.max(4, hi - lo), xc = (lo + hi) / 2;
     const r = Math.max(W / TAU, A.radius(Math.max(t, A.root)) + gap);
     const th = TAU * (x - xc) / W;
