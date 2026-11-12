@@ -350,7 +350,7 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = 7 } = {})
 
   const g = {
     nv,
-    positions, flat, uvs, panelOf, kind, seamLines: new Uint32Array(seamLines),
+    positions, flat, uvs, panelOf, kind, seamVert, seamLines: new Uint32Array(seamLines),
     index: nv > 65535 ? new Uint32Array(index) : new Uint16Array(index),
     armpitY: (levels.strapless_top || 130) - 2,
     stretch: new Uint32Array(stretch), stretchRest: new Float32Array(stretchRest),
@@ -437,6 +437,138 @@ function projectOut(g, sdf, margin, iters) {
 }
 
 // ---------------------------------------------------------------------------
+// Cloth self-collision, after Ten Minute Physics #15 (Matthias Müller, MIT): particles
+// keep a minimum distance from each other. Candidate pairs come from a spatial hash
+// that is rebuilt every few substeps with a query radius covering the largest
+// possible travel in between; mesh neighbours (within two rings) are exempt, and
+// pairs that are closer than the thickness in the flat pattern only keep their
+// rest distance.
+class SelfCollider {
+  constructor(g, thickness) {
+    const n = g.nv;
+    this.n = n; this.th = thickness;
+    // 1- and 2-ring neighbourhood (CSR) from the stretch edges
+    const deg = new Int32Array(n + 1);
+    const E = g.stretch;
+    for (let c = 0; c < E.length; c++) deg[E[c]]++;
+    const s1 = new Int32Array(n + 1);
+    for (let v = 0; v < n; v++) s1[v + 1] = s1[v] + deg[v];
+    const a1 = new Int32Array(s1[n]), fill = s1.slice(0, n);
+    for (let c = 0; c < E.length; c += 2) { a1[fill[E[c]]++] = E[c + 1]; a1[fill[E[c + 1]]++] = E[c]; }
+    const stamp = new Int32Array(n).fill(-1), ring = [], rs = new Int32Array(n + 1);
+    for (let v = 0; v < n; v++) {
+      stamp[v] = v;
+      for (let k = s1[v]; k < s1[v + 1]; k++) {
+        const u = a1[k];
+        if (stamp[u] !== v) { stamp[u] = v; ring.push(u); }
+        for (let m = s1[u]; m < s1[u + 1]; m++) { const w = a1[m]; if (stamp[w] !== v) { stamp[w] = v; ring.push(w); } }
+      }
+      rs[v + 1] = ring.length;
+    }
+    this.ringStart = rs; this.ring = new Int32Array(ring);
+    this.stampR = new Int32Array(n).fill(-1);
+    this.flat = g.flat; this.panelOf = g.panelOf; this.seam = g.seamVert;
+    let ts = 1; while (ts < 2 * n) ts <<= 1;
+    this.mask = ts - 1;
+    this.cellStart = new Int32Array(ts + 1); this.cellEntries = new Int32Array(n); this.cellOf = new Int32Array(n);
+    this.cX = new Int32Array(n); this.cY = new Int32Array(n); this.cZ = new Int32Array(n);
+    this.xs = new Float32Array(3 * n); this.ck = new Int32Array(3 * n);
+    this.pairs = new Int32Array(16 * n); this.minD = new Float32Array(8 * n); this.np = 0;
+  }
+
+  _h(xi, yi, zi) { return (Math.imul(xi, 92837111) ^ Math.imul(yi, 689287499) ^ Math.imul(zi, 283923481)) & this.mask; }
+
+  /** Collect all non-neighbour pairs closer than `radius` (cell size = radius). */
+  build(x, radius) {
+    const n = this.n, inv = 1 / radius, cs = this.cellStart, ce = this.cellEntries, co = this.cellOf;
+    const cX = this.cX, cY = this.cY, cZ = this.cZ;
+    cs.fill(0);
+    for (let v = 0; v < n; v++) {
+      const i = Math.floor(x[3 * v] * inv), j = Math.floor(x[3 * v + 1] * inv), k = Math.floor(x[3 * v + 2] * inv);
+      cX[v] = i; cY[v] = j; cZ[v] = k;
+      const h = this._h(i, j, k);
+      co[v] = h; cs[h]++;
+    }
+    let st = 0;
+    for (let i = 0; i <= this.mask; i++) { st += cs[i]; cs[i] = st; }
+    cs[this.mask + 1] = st;
+    // cell-sorted copies of positions and cell coordinates, so candidate scans are contiguous
+    const xs = this.xs, ck = this.ck;
+    for (let v = 0; v < n; v++) {
+      const e = --cs[co[v]];
+      ce[e] = v;
+      xs[3 * e] = x[3 * v]; xs[3 * e + 1] = x[3 * v + 1]; xs[3 * e + 2] = x[3 * v + 2];
+      ck[3 * e] = cX[v]; ck[3 * e + 1] = cY[v]; ck[3 * e + 2] = cZ[v];
+    }
+    const r2 = radius * radius, th = this.th, th2 = th * th;
+    const sR = this.stampR, rs = this.ringStart, ring = this.ring, OFF = SelfCollider.OFF, mask = this.mask;
+    const fl = this.flat, po = this.panelOf, seam = this.seam;
+    let np = 0, pairs = this.pairs, minD = this.minD;
+    for (let v = 0; v < n; v++) {
+      for (let k = rs[v]; k < rs[v + 1]; k++) sR[ring[k]] = v;
+      const px = x[3 * v], py = x[3 * v + 1], pz = x[3 * v + 2];
+      // half stencil: own cell (u > v) + the 13 "forward" neighbour cells, so each pair
+      // is visited once; exact cell coordinates filter out hash collisions
+      const vx = cX[v], vy = cY[v], vz = cZ[v];
+      for (let o = 0; o < 42; o += 3) {
+        const a = vx + OFF[o], b = vy + OFF[o + 1], c = vz + OFF[o + 2];
+        const h = (Math.imul(a, 92837111) ^ Math.imul(b, 689287499) ^ Math.imul(c, 283923481)) & mask;
+        for (let e = cs[h], end = cs[h + 1]; e < end; e++) {
+          if (ck[3 * e] !== a || ck[3 * e + 1] !== b || ck[3 * e + 2] !== c) continue;
+          const dx = xs[3 * e] - px, dy = xs[3 * e + 1] - py, dz = xs[3 * e + 2] - pz;
+          if (dx * dx + dy * dy + dz * dz > r2) continue;
+          const u = ce[e];
+          if ((o === 0 && u <= v) || sR[u] === v) continue;
+          let md = th;
+          if (po[u] === po[v] && !seam[u] && !seam[v]) {
+            const fx = fl[3 * u] - fl[3 * v], fy = fl[3 * u + 1] - fl[3 * v + 1], fz = fl[3 * u + 2] - fl[3 * v + 2];
+            const rd2 = fx * fx + fy * fy + fz * fz;
+            if (rd2 < th2) { if (rd2 < 1e-4) continue; md = Math.sqrt(rd2); }
+          }
+          if (np * 2 >= pairs.length) {
+            const P2 = new Int32Array(pairs.length * 2); P2.set(pairs); pairs = this.pairs = P2;
+            const M2 = new Float32Array(minD.length * 2); M2.set(minD); minD = this.minD = M2;
+          }
+          pairs[2 * np] = v; pairs[2 * np + 1] = u; minD[np] = md; np++;
+        }
+      }
+    }
+    this.np = np;
+  }
+
+  /** Push close pairs apart; `mu` blends their substep displacement (friction between layers). */
+  solve(x, p, mu) {
+    const pairs = this.pairs, minD = this.minD;
+    let hits = 0;
+    for (let k = 0; k < this.np; k++) {
+      const a = 3 * pairs[2 * k], b = 3 * pairs[2 * k + 1], md = minD[k];
+      const dx = x[b] - x[a], dy = x[b + 1] - x[a + 1], dz = x[b + 2] - x[a + 2];
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 >= md * md || d2 < 1e-12) continue;
+      hits++;
+      const d = Math.sqrt(d2), s = 0.5 * (md - d) / d;
+      x[a] -= dx * s; x[a + 1] -= dy * s; x[a + 2] -= dz * s;
+      x[b] += dx * s; x[b + 1] += dy * s; x[b + 2] += dz * s;
+      if (mu > 0) {
+        // move both towards their average displacement this substep
+        for (let c = 0; c < 3; c++) {
+          const va = x[a + c] - p[a + c], vb = x[b + c] - p[b + c], avg = 0.5 * (va + vb);
+          x[a + c] += (avg - va) * mu; x[b + c] += (avg - vb) * mu;
+        }
+      }
+    }
+    return hits;
+  }
+}
+// own cell first, then the 13 neighbour cells that are lexicographically "after" it
+SelfCollider.OFF = (() => {
+  const o = [0, 0, 0];
+  for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (let c = -1; c <= 1; c++)
+    if (a > 0 || (a === 0 && (b > 0 || (b === 0 && c > 0)))) o.push(a, b, c);
+  return new Int32Array(o);
+})();
+
+// ---------------------------------------------------------------------------
 // XPBD-style solver: small substeps, stretch + bending distance constraints,
 // gentle half-space attachments, body SDF collision with Coulomb-like friction.
 export class ClothSim {
@@ -457,7 +589,14 @@ export class ClothSim {
       maxVelocity: 250,                            // cm/s clamp (GarmentCode: global_max_velocity)
       attachStiffness: 1, collarStiffness: 0.06, attachFrames: 400, releaseAttachments: false,
       maxDuration: 14, settleSpeed: 2.0, minDuration: 2.0, frictionScale: 1,
+      // cloth self-collision (Ten Minute Physics #15)
+      selfCollision: true, selfThickness: 1.4, selfFriction: 0.1, selfMargin: 1.5,
+      selfStartFrame: 0,                           // frames before self-collision starts
+      selfMinInterval: 3,                          // min substeps between pair rebuilds (cost cap)
+      selfMaxPairs: 3,                             // pair budget per particle before giving up
     }, opts);
+    this.self = null;   // built on first use, so it can be toggled live
+    this.selfMs = 0; this.selfPairs = 0; this.selfBuilds = 0; this.selfTravel = Infinity; this.selfAge = Infinity;
     this.reset();
     this._g = [0, 0, 0];
   }
@@ -465,7 +604,7 @@ export class ClothSim {
   reset() {
     this.x.set(this.x0); this.v.fill(0);
     if (this.cpush) this.cpush.fill(0);
-    this.t = 0; this.frame = 0; this.settled = false; this.releaseY = null;
+    this.t = 0; this.frame = 0; this.settled = false; this.releaseY = null; this.selfTravel = Infinity; this.selfAge = Infinity; this.selfOverload = false;
   }
 
   get attachEnd() { return this.opts.releaseAttachments ? this.opts.attachFrames / 60 : Infinity; }
@@ -544,6 +683,25 @@ export class ClothSim {
         this.releaseY = this.topY();
       }
 
+      // self-collision before the body, so the body always has the last word
+      if (o.selfCollision && !this.selfOverload && this.frame >= o.selfStartFrame) {
+        if (!this.self) this.self = new SelfCollider(g, o.selfThickness);
+        // Rebuild the candidate pairs once any two particles may have closed in by more
+        // than the margin since the last build (tracked from the actual per-substep
+        // displacements below), so pairs can't be missed and slow cloth rarely rebuilds.
+        if (this.selfTravel > o.selfMargin && this.selfAge >= o.selfMinInterval) {
+          const tq = (typeof performance !== 'undefined' ? performance : Date).now();
+          this.self.build(x, o.selfThickness + o.selfMargin);
+          this.selfTravel = 0; this.selfAge = 0; this.selfBuilds++;
+          this.selfPairs = this.self.np;
+          // A crumpled, collapsed mesh (e.g. a degenerate pattern) yields huge pair lists
+          // that cannot be resolved anyway: give up on self-collision rather than stall.
+          if (this.self.np > o.selfMaxPairs * n) { this.selfOverload = true; this.self.np = 0; }
+          this.selfMs += (typeof performance !== 'undefined' ? performance : Date).now() - tq;
+        }
+        this.self.solve(x, p, o.selfFriction);
+      }
+
       // body collision (projection only; friction is applied to velocities above)
       const th = o.thickness;
       for (let vi = 0; vi < n; vi++) {
@@ -557,6 +715,16 @@ export class ClothSim {
         x[i] += grad[0] * push; x[i + 1] += grad[1] * push; x[i + 2] += grad[2] * push;
       }
       const inv = 1 / dt;
+      if (this.self) {
+        // two particles can close in by at most the two largest displacements
+        let m1 = 0, m2 = 0;
+        for (let i = 0; i < 3 * n; i += 3) {
+          const dx = x[i] - p[i], dy = x[i + 1] - p[i + 1], dz = x[i + 2] - p[i + 2], s2 = dx * dx + dy * dy + dz * dz;
+          if (s2 > m2) { if (s2 > m1) { m2 = m1; m1 = s2; } else m2 = s2; }
+        }
+        this.selfTravel += Math.sqrt(m1) + Math.sqrt(m2);
+        this.selfAge++;
+      }
       if (this.frame < o.relaxFrames) { v.fill(0); continue; }
       const vmax2 = o.maxVelocity * o.maxVelocity;
       for (let i = 0; i < 3 * n; i += 3) {

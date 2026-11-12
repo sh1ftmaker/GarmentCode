@@ -37,6 +37,7 @@ const viewer = new Viewer($('#three'));
 const bodies = {};            // base name -> { base, prep, sdfBuf }
 let sdf = null, sdfReady = Promise.resolve(), sdfToken = 0;
 let sim = null, pattern = null, genToken = 0, paused = false, flat = false;
+let selfCollide = true;   // LAB: cloth self-collision on/off (btn-selfcol)
 const cut = { pieces: null, layout: null, edited: false, key: '', sa: 1.5 };
 
 // ---------------------------------------------------------------- status & toasts
@@ -187,7 +188,7 @@ function startDrape() {
   }
   const g = buildGarment(pattern, S.fabric.res, sdf, { armAxes });
   viewer.setGarment(g);
-  sim = new ClothSim(g, sdf, { ...simParams(S.fabric), releaseAttachments: S.fabric.release });
+  sim = new ClothSim(g, sdf, { ...simParams(S.fabric), releaseAttachments: S.fabric.release, selfCollision: selfCollide });
   paused = false; flat = false;
   status(`Draping ${pattern.panels.length} panels…`, true);
   updateDrapeChip();
@@ -636,6 +637,12 @@ $('#btn-fit').onclick = () => {
   frameCount = 0;
   if (on && sim) { fitBufS = sim.vertexStrain(); fitBufE = sim.vertexEase(); viewer.updateFitColors(fitBufS, fitBufE); }
   if (!on) applyFabricLook();
+};
+// LAB: compare with / without cloth self-collision; restarts the drape
+$('#btn-selfcol').onclick = () => {
+  selfCollide = !selfCollide;
+  $('#btn-selfcol').classList.toggle('on', selfCollide);
+  startDrape();
 };
 $('#btn-body').onclick = () => { const on = !$('#btn-body').classList.contains('on'); $('#btn-body').classList.toggle('on', on); viewer.showBody(on); };
 $('#btn-camera').onclick = () => { if (viewer.ok) viewer.resetCamera(); };

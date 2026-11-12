@@ -77,6 +77,7 @@ button, input, select { font: inherit; color: inherit; }
 }
 .brand-text { font-family: var(--font-display); font-size: 18px; letter-spacing: -.01em; }
 .brand-text b { font-weight: 600; }
+.lab-badge { font: 700 11px/1 var(--font); letter-spacing: .08em; color: #fff; background: #d6452f; padding: 4px 7px; border-radius: 6px; }
 .badge {
   font-size: 10px; text-transform: uppercase; letter-spacing: .08em; padding: 2px 6px; border-radius: 999px;
   border: 1px solid var(--line-strong); color: var(--ink-2);
