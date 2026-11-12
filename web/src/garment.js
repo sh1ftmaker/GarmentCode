@@ -125,7 +125,7 @@ function panelKind(label) { return label === 'leg' ? LEG : label === 'body' ? BO
  * its own radius so the slice reaches roughly a quarter turn: tops become cylinders,
  * skirts cones, sleeves tubes around the arm.
  */
-function wrapPanel(P, n0, axis, rMin = 9) {
+function wrapPanel(P, n0, axis, rMin = 9, ringCheck = false) {
   const [cx, cy, cz] = axis.c, [ax, ay, az] = axis.a;
   // panel normal made perpendicular to the axis, oriented away from it
   const na = n0[0] * ax + n0[1] * ay + n0[2] * az;
@@ -160,7 +160,7 @@ function wrapPanel(P, n0, axis, rMin = 9) {
   // Narrow panels that GarmentCode already arranged in a ring around the axis (e.g. a
   // 15-gore skirt) are facets of that ring: bending each one to a quarter turn would
   // collapse it into the body.
-  if ((uMax - uMin) / 2 < 0.6 * dMean) return false;
+  if (ringCheck && (uMax - uMin) / 2 < 0.6 * dMean) return false;
   // per-slice half-width -> radius
   const BIN = 2, nb = Math.max(1, Math.ceil((tMax - tMin) / BIN) + 1);
   const wb = new Float32Array(nb);
@@ -185,6 +185,61 @@ function wrapPanel(P, n0, axis, rMin = 9) {
     P[3 * i + 2] = cz + t[i] * az + rr * (cs * nz + sn * tz);
   }
   return true;
+}
+
+/**
+ * GarmentCode places sleeves at the design's sleeve angle, not along the mannequin's arms
+ * (which hang at the body's arm pose angle). A sleeve left at the wrong angle starts with
+ * the arm cutting through it and stays caught on the wrong side, so swing each side's
+ * sleeve group (sleeve + cuff panels) about its armhole end in the frontal plane until it
+ * points along the arm.
+ */
+function alignSleeves(panels, armAxes) {
+  for (const sgn of [1, -1]) {
+    const ax = sgn > 0 ? armAxes.pos : armAxes.neg;
+    if (!ax) continue;
+    const group = panels.filter(q => {
+      if (q.kind !== ARM) return false;
+      let mx = 0; for (let i = 0; i < q.P.length; i += 3) mx += q.P[i];
+      return mx * sgn > 0;
+    });
+    if (!group.length) continue;
+    // principal direction of the group in the x-y (frontal) plane
+    let n = 0, cx = 0, cy = 0;
+    for (const q of group) for (let i = 0; i < q.P.length; i += 3) { cx += q.P[i]; cy += q.P[i + 1]; n++; }
+    cx /= n; cy /= n;
+    let sxx = 0, sxy = 0, syy = 0, inner = Infinity;
+    for (const q of group) for (let i = 0; i < q.P.length; i += 3) {
+      const dx = q.P[i] - cx, dy = q.P[i + 1] - cy;
+      sxx += dx * dx; sxy += dx * dy; syy += dy * dy;
+      inner = Math.min(inner, q.P[i] * sgn);
+    }
+    const th = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+    let dx = Math.cos(th), dy = Math.sin(th);
+    if (dx * sgn < 0) { dx = -dx; dy = -dy; }            // pointing away from the body
+    // arm direction (towards the hand) in the frontal plane
+    let axx = ax.a[0], axy = ax.a[1];
+    const al = Math.hypot(axx, axy);
+    if (al < 0.3) continue;
+    axx /= al; axy /= al;
+    if (axx * sgn < 0) { axx = -axx; axy = -axy; }
+    const ang = Math.atan2(axy, axx) - Math.atan2(dy, dx);
+    if (Math.abs(ang) < 0.05 || Math.abs(ang) > 1.2) continue;
+    // pivot: the armhole end of the sleeve (innermost points)
+    let px = 0, py = 0, m = 0;
+    for (const q of group) for (let i = 0; i < q.P.length; i += 3) if (q.P[i] * sgn < inner + 3) { px += q.P[i]; py += q.P[i + 1]; m++; }
+    px /= m; py /= m;
+    const c = Math.cos(ang), s = Math.sin(ang);
+    for (const q of group) {
+      const P = q.P;
+      for (let i = 0; i < P.length; i += 3) {
+        const rx = P[i] - px, ry = P[i + 1] - py;
+        P[i] = px + c * rx - s * ry; P[i + 1] = py + s * rx + c * ry;
+      }
+      const [nx, ny, nz] = q.n0;
+      q.n0 = [c * nx - s * ny, s * nx + c * ny, nz];
+    }
+  }
 }
 
 /** Build the simulation-ready garment from the exported GarmentCode pattern. */
@@ -223,21 +278,28 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = 7 } = {})
     const flat = new Float32Array(P);
     const kind = panelKind(p.label);
     const n0 = [R[0][2], R[1][2], R[2][2]];
+    return { p, pi, pts, tris, P, flat, kind, n0 };
+  });
+  if (armAxes) alignSleeves(panels, armAxes);
+  for (const q of panels) {
+    const { p, P, kind, n0 } = q;
     // One-leg panels (trousers) wrap around their own leg, everything else around the torso.
     let xMin = Infinity, xMax = -Infinity;
     for (let i = 0; i < P.length; i += 3) { xMin = Math.min(xMin, P[i]); xMax = Math.max(xMax, P[i]); }
     const oneLeg = kind === LEG && (xMin > -3 || xMax < 3) && /pant|leg/.test(p.name);
+    let axis = null;
     if (oneLeg) {
       const xc = (xMin + xMax) / 2;
-      wrapPanel(P, n0, { c: [xc, 0, BODY_AXIS.c[2]], a: BODY_AXIS.a }, 7);
-    } else if (kind !== ARM) wrapPanel(P, n0, BODY_AXIS);
+      axis = { c: [xc, 0, BODY_AXIS.c[2]], a: BODY_AXIS.a };
+      wrapPanel(P, n0, axis, 7);
+    } else if (kind !== ARM) { axis = BODY_AXIS; wrapPanel(P, n0, BODY_AXIS, 9, true); }
     else if (armAxes) {   // sleeves: wrap around the arm on the panel's side
       let mx = 0; for (let i = 0; i < P.length; i += 3) mx += P[i];
-      const ax = mx >= 0 ? armAxes.pos : armAxes.neg;
-      if (ax) wrapPanel(P, n0, ax, 3.5);
+      axis = (mx >= 0 ? armAxes.pos : armAxes.neg) || null;
+      if (axis) wrapPanel(P, n0, axis, 3.5);
     }
-    return { p, pi, pts, tris, P, flat, kind };
-  });
+    q.axis = axis;
+  }
   const offsets = {};
   let total = 0;
   for (const q of panels) { offsets[q.p.name] = total; q.base = total; total += q.pts.length; }
@@ -260,12 +322,13 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = 7 } = {})
   const positions = new Float32Array(nv * 3), flat = new Float32Array(nv * 3), cnt = new Float32Array(nv);
   const uvs = new Float32Array(nv * 2), panelOf = new Uint16Array(nv), kind = new Uint8Array(nv).fill(ARM);
   const seamVert = new Uint8Array(nv);
+  const axisOf = new Array(nv).fill(null);   // axis the vertex's panel was wrapped around
   for (const q of panels) {
     q.pts.forEach(([x, y], i) => {
       const v = remap[q.base + i];
       positions[3 * v] += q.P[3 * i]; positions[3 * v + 1] += q.P[3 * i + 1]; positions[3 * v + 2] += q.P[3 * i + 2];
       flat[3 * v] += q.flat[3 * i]; flat[3 * v + 1] += q.flat[3 * i + 1]; flat[3 * v + 2] += q.flat[3 * i + 2];
-      if (cnt[v] === 0) { uvs[2 * v] = x / 25; uvs[2 * v + 1] = y / 25; panelOf[v] = q.pi; kind[v] = q.kind; }
+      if (cnt[v] === 0) { uvs[2 * v] = x / 25; uvs[2 * v + 1] = y / 25; panelOf[v] = q.pi; kind[v] = q.kind; axisOf[v] = q.axis; }
       else { seamVert[v] = 1; kind[v] = Math.min(kind[v], q.kind) === ARM ? ARM : Math.max(kind[v], q.kind); }
       cnt[v]++;
     });
@@ -359,7 +422,7 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = 7 } = {})
     attach: new Uint32Array(attach), attachY: new Float32Array(attachY),
     collar: new Uint32Array(collar), collarX: new Float32Array(collarX),
   };
-  if (sdf) projectOut(g, sdf, 1.0, 6);
+  if (sdf) projectOut(g, sdf, 1.0, 6, axisOf);
   return g;
 }
 
@@ -422,8 +485,30 @@ function orientTriangles(index, nv, x, sdf) {
 /** Collision filter, mirroring GarmentCode: lower garments ignore arms; torso below the armpit too. */
 function ignoresArm(kind) { return kind === LEG; }
 
-function projectOut(g, sdf, margin, iters) {
+function projectOut(g, sdf, margin, iters, axisOf = null) {
   const x = g.positions, grad = [0, 0, 0];
+  // Deeply buried vertices first move straight out from the axis their panel was wrapped
+  // around: the nearest surface can be the far side of a limb, and cloth pushed there ends
+  // up wrapped around the wrong side of the leg / arm for the whole drape.
+  if (axisOf) for (let v = 0; v < g.nv; v++) {
+    const ax = axisOf[v];
+    if (!ax) continue;
+    const i = 3 * v;
+    let d = sdf.sample(x[i], x[i + 1], x[i + 2], grad);
+    if (d >= margin || (sdf.lastArm && ignoresArm(g.kind[v]))) continue;
+    const [cx, cy, cz] = ax.c, [ax_, ay, az] = ax.a;
+    const rx = x[i] - cx, ry = x[i + 1] - cy, rz = x[i + 2] - cz;
+    const t = rx * ax_ + ry * ay + rz * az;
+    let ux = rx - t * ax_, uy = ry - t * ay, uz = rz - t * az;
+    const ul = Math.hypot(ux, uy, uz);
+    if (ul < 1e-6) continue;
+    ux /= ul; uy /= ul; uz /= ul;
+    for (let k = 0; k < 40 && d < margin; k++) {
+      const step = Math.max(0.5, margin - d);
+      x[i] += ux * step; x[i + 1] += uy * step; x[i + 2] += uz * step;
+      d = sdf.sample(x[i], x[i + 1], x[i + 2], grad);
+    }
+  }
   for (let it = 0; it < iters; it++) {
     for (let v = 0; v < g.nv; v++) {
       const i = 3 * v;
