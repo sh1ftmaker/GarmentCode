@@ -425,6 +425,10 @@ async function commitParam(path, value) {
 const TPL_ICONS = {
   tee: 'M14 8l8-4h12l8 4 6 10-7 4-3-5v31H18V17l-3 5-7-4z',
   longsleeve: 'M14 8l8-4h12l8 4 8 30-6 2-6-20v28H18V20l-6 20-6-2z',
+  hoodie: 'M20 10c-1-9 17-9 16 0l6 2 8 28-6 2-6-20v26H18V22l-6 20-6-2 8-28zM22 38h12l3 8H19z',
+  ziphoodie: 'M20 10c-1-9 17-9 16 0l6 2 8 28-6 2-6-20v26H29V14h-2v34H18V22l-6 20-6-2 8-28z',
+  sweatshirt: 'M14 8l8-4c2 4 10 4 12 0l8 4 8 30-6 2-6-20v24H18V20l-6 20-6-2zM18 44h20v4H18z',
+  joggers: 'M14 4h28l3 44h-11l-6-30-6 30H11zM11 48h11v4H11zM34 48h11v4H34z',
   aline: 'M20 4h16l2 16 10 30H8l10-30z',
   sundress: 'M18 6h20v14l12 30H6l12-30z',
   maxi: 'M22 2c4-2 8-2 12 0l4 10 6 4-4 4-2-2 6 34H12l6-34-2 2-4-4 6-4z',

@@ -8,6 +8,19 @@ from assets.garment_programs.base_classes import BaseBodicePanel
 from assets.garment_programs import sleeves
 from assets.garment_programs import collars
 from assets.garment_programs import tee
+from assets.garment_programs import bands
+from assets.garment_programs import pockets
+
+
+def _opt(design, *path):
+    """Value of an optional design parameter (None if the design does not define it).
+    Used for the web port's additions, so designs without them stay valid."""
+    node = design
+    for k in path:
+        if not isinstance(node, dict) or k not in node:
+            return None
+        node = node[k]
+    return node.get('v') if isinstance(node, dict) else None
 from scipy.spatial.transform import Rotation as R
 
 class BodiceFrontHalf(BaseBodicePanel):
@@ -201,6 +214,12 @@ class BodiceHalf(pyg.Component):
         self.sleeve = None
         self.collar_comp = None
         self.eval_dep_params(body, design)
+
+        # Kangaroo pocket (web port addition; loose tops only, the fitted
+        # bodice has darts in the way)
+        self.f_lower = self.pocket = None
+        if not fitted and _opt(design, 'shirt', 'pocket', 'type') == 'KangarooPocket':
+            pockets.add_kangaroo_pocket(self, body, design)
 
         if design['shirt']['strapless']['v'] and fitted:  # NOTE: Strapless design only for fitted tops
             self.make_strapless(body, design)
@@ -432,7 +451,7 @@ class Shirt(pyg.Component):
         name_with_params = f"{self.__class__.__name__}"
         super().__init__(name_with_params)
 
-        design = self.eval_dep_params(design)
+        design = self.eval_dep_params(design, body)
 
         self.right = BodiceHalf(f'right', body, design, fitted=fitted)
         self.left = BodiceHalf(
@@ -440,10 +459,18 @@ class Shirt(pyg.Component):
             design['left'] if design['left']['enable_asym']['v'] else design, 
             fitted=fitted).mirror()
 
-        self.stitching_rules.append((self.right.interfaces['front_in'],
-                                     self.left.interfaces['front_in']))
+        # Open front (web port addition): the centre front is left unsewn,
+        # as in a zip-up hoodie, cardigan or jacket worn open
+        open_front = bool(_opt(design, 'shirt', 'open_front'))
+        if not open_front:
+            self.stitching_rules.append((self.right.interfaces['front_in'],
+                                         self.left.interfaces['front_in']))
         self.stitching_rules.append((self.right.interfaces['back_in'],
                                      self.left.interfaces['back_in']))
+        if (not open_front and 'pocket_in' in self.right.interfaces
+                and 'pocket_in' in self.left.interfaces):
+            self.stitching_rules.append((self.right.interfaces['pocket_in'],
+                                         self.left.interfaces['pocket_in']))
 
         # Adjust interface ordering for correct connectivity
         self.interfaces = {   # Bottom connection
@@ -454,7 +481,32 @@ class Shirt(pyg.Component):
                 self.right.interfaces['b_bottom'],)
         }
 
-    def eval_dep_params(self, design):
+        # Hem band (web port addition)
+        self.hem_band = None
+        if _opt(design, 'shirt', 'hem_band', 'enable'):
+            self.hem_band = bands.HemBand(
+                body, design,
+                hem_length=self.interfaces['bottom'].edges.length(),
+                level=design['shirt']['length']['v'] * body['waist_line'],
+                split_front=open_front)
+            self.hem_band.place_by_interface(
+                self.hem_band.interfaces['top'],
+                self.interfaces['bottom'],
+                gap=5
+            )
+            self.stitching_rules.append(
+                (self.interfaces['bottom'], self.hem_band.interfaces['top']))
+            self.interfaces['bottom'] = self.hem_band.interfaces['bottom']
+
+    def eval_dep_params(self, design, body=None):
+        # Hem band is included in the length of the garment (web port addition)
+        if body is not None and _opt(design, 'shirt', 'hem_band', 'enable'):
+            design = deepcopy(design)
+            band_len = design['shirt']['hem_band']['depth']['v'] * body["hips_line"]
+            length = design['shirt']['length']
+            min_len = length['range'][0] if 'range' in length else 0.5
+            length['v'] = max(min_len, length['v'] - band_len / body["waist_line"])
+
         # NOTE: Support for full collars with partially strapless top
         # or combination of paneled collar styles
         # requres further development
@@ -473,9 +525,15 @@ class Shirt(pyg.Component):
             design['left']['collar']['fc_depth']['v'] = design['collar']['fc_depth']['v']
             design['left']['collar']['bc_depth']['v'] = design['collar']['bc_depth']['v']
 
+            # Web port additions apply to both sides
+            if 'pocket' in design['shirt']:
+                design['left']['shirt']['pocket'] = deepcopy(design['shirt']['pocket'])
+
         return design
 
     def length(self):
+        if getattr(self, 'hem_band', None) is not None:
+            return self.right.length() + self.hem_band.length()
         return self.right.length()
 
 class FittedShirt(Shirt):

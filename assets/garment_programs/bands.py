@@ -260,3 +260,79 @@ class CuffBandSkirt(pyg.Component):
 
     def length(self):
         return self.cuff.length() + self.skirt.length()
+
+
+class HemBand(BaseBand):
+    """Ribbed hem band of an upper garment (e.g. a hoodie or a sweatshirt)
+
+        A straight two-panel band, like StraightWB, sewn to the bottom of the
+        garment. Its circumference is a fraction of the garment's hem, so the
+        hem gathers into the band, but never smaller than the body at the
+        level where the band sits.
+
+        NOTE: Addition of the unofficial web port (not part of the original
+        GarmentCode design space).
+    """
+    def __init__(self, body, design, hem_length, level, split_front=False) -> None:
+        """
+            * hem_length -- length of the hem the band is sewn to
+            * level -- distance from the shoulder line to the top of the band
+            * split_front -- front band in two halves (for open-front garments)
+        """
+        super().__init__(body, design, tag='hem')
+
+        bdesign = design['shirt']['hem_band']
+        self.width = bdesign['depth']['v'] * body['hips_line']
+
+        # Body circumference at the band level (between waist and hips)
+        bottom_level = level + self.width
+        if bottom_level <= body['waist_line']:
+            min_circ = body['waist']
+        else:
+            min_circ = pyg.utils.lin_interpolation(
+                body['waist'], body['hips'],
+                min(1., (bottom_level - body['waist_line']) / body['hips_line']))
+        min_circ = max(min_circ, body['waist'])
+        circ = max(bdesign['fit']['v'] * hem_length, min_circ)
+
+        # Front/back split as in the garment's hem (it is matched to the waist)
+        back_frac = body['waist_back_width'] / body['waist']
+        front_w = circ * (1 - back_frac)
+        front_match = body['waist'] - body['waist_back_width']
+        self.back = StraightBandPanel(
+            'hem_band_back', circ * back_frac, self.width,
+            match_int_proportion=body['waist_back_width'])
+        self.back.translate_by([0, body['_waist_level'], -15])
+
+        if not split_front:
+            self.front = StraightBandPanel(
+                'hem_band_front', front_w, self.width, match_int_proportion=front_match)
+            self.front.translate_by([0, body['_waist_level'], 20])
+            fronts = [self.front]
+            self.stitching_rules = pyg.Stitches(
+                (self.front.interfaces['right'], self.back.interfaces['right']),
+                (self.front.interfaces['left'], self.back.interfaces['left'])
+            )
+        else:
+            # Halves in the order the garment's hem runs (right half first)
+            self.front_l = StraightBandPanel(
+                'hem_band_front_l', front_w / 2, self.width, match_int_proportion=front_match / 2)
+            self.front_l.translate_by([front_w / 4, body['_waist_level'], 20])
+            self.front_r = StraightBandPanel(
+                'hem_band_front_r', front_w / 2, self.width, match_int_proportion=front_match / 2)
+            self.front_r.translate_by([-front_w / 4, body['_waist_level'], 20])
+            fronts = [self.front_r, self.front_l]
+            self.stitching_rules = pyg.Stitches(
+                (self.front_r.interfaces['right'], self.back.interfaces['right']),
+                (self.front_l.interfaces['left'], self.back.interfaces['left'])
+            )
+
+        self.interfaces = {
+            'top': pyg.Interface.from_multiple(
+                *[f.interfaces['top'] for f in fronts], self.back.interfaces['top']),
+            'bottom': pyg.Interface.from_multiple(
+                *[f.interfaces['bottom'] for f in fronts], self.back.interfaces['bottom']),
+        }
+
+    def length(self):
+        return self.width

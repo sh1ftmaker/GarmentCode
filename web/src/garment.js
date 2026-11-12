@@ -125,7 +125,7 @@ function panelKind(label) { return label === 'leg' ? LEG : label === 'body' ? BO
  * its own radius so the slice reaches roughly a quarter turn: tops become cylinders,
  * skirts cones, sleeves tubes around the arm.
  */
-function wrapPanel(P, n0, axis, rMin = 9, ringCheck = false) {
+function wrapPanel(P, n0, axis, rMin = 9, ringCheck = false, base = null) {
   const [cx, cy, cz] = axis.c, [ax, ay, az] = axis.a;
   // panel normal made perpendicular to the axis, oriented away from it
   const na = n0[0] * ax + n0[1] * ay + n0[2] * az;
@@ -133,6 +133,7 @@ function wrapPanel(P, n0, axis, rMin = 9, ringCheck = false) {
   const nl = Math.hypot(nx, ny, nz);
   if (nl < 0.7) return false;           // panel not facing the axis (e.g. horizontal pieces)
   nx /= nl; ny /= nl; nz /= nl;
+  if (base) [nx, ny, nz] = base.n;      // overlay: same frame as the panel underneath
   const cnt = P.length / 3;
   const t = new Float32Array(cnt), u = new Float32Array(cnt), d = new Float32Array(cnt);
   let dMean = 0;
@@ -143,8 +144,8 @@ function wrapPanel(P, n0, axis, rMin = 9, ringCheck = false) {
     dMean += d[i];
   }
   dMean /= cnt;
-  if (dMean < 0) { nx = -nx; ny = -ny; nz = -nz; dMean = -dMean; for (let i = 0; i < cnt; i++) d[i] = -d[i]; }
-  if (dMean < 3) return false;
+  if (!base && dMean < 0) { nx = -nx; ny = -ny; nz = -nz; dMean = -dMean; for (let i = 0; i < cnt; i++) d[i] = -d[i]; }
+  if (!base && dMean < 3) return false;
   // tangent = a x n
   const tx = ay * nz - az * ny, ty = az * nx - ax * nz, tz = ax * ny - ay * nx;
   let uMin = Infinity, uMax = -Infinity, tMin = Infinity, tMax = -Infinity;
@@ -153,6 +154,16 @@ function wrapPanel(P, n0, axis, rMin = 9, ringCheck = false) {
     u[i] = rx * tx + ry * ty + rz * tz;
     uMin = Math.min(uMin, u[i]); uMax = Math.max(uMax, u[i]);
     tMin = Math.min(tMin, t[i]); tMax = Math.max(tMax, t[i]);
+  }
+  if (base) {   // follow the panel underneath, keeping the drafted distance in front of it
+    for (let i = 0; i < cnt; i++) {
+      const r = base.radius(t[i]), rr = r + (d[i] - base.dMean), th = u[i] / r;
+      const cs = Math.cos(th), sn = Math.sin(th);
+      P[3 * i] = cx + t[i] * ax + rr * (cs * nx + sn * tx);
+      P[3 * i + 1] = cy + t[i] * ay + rr * (cs * ny + sn * ty);
+      P[3 * i + 2] = cz + t[i] * az + rr * (cs * nz + sn * tz);
+    }
+    return base;
   }
   // only wrap panels that face the axis (e.g. not collar pieces placed off to the side)
   const uc = (uMin + uMax) / 2;
@@ -184,7 +195,7 @@ function wrapPanel(P, n0, axis, rMin = 9, ringCheck = false) {
     P[3 * i + 1] = cy + t[i] * ay + rr * (cs * ny + sn * ty);
     P[3 * i + 2] = cz + t[i] * az + rr * (cs * nz + sn * tz);
   }
-  return true;
+  return { n: [nx, ny, nz], dMean, radius };
 }
 
 /**
@@ -356,6 +367,88 @@ function placeSkirtRing(panels, stitches) {
   return info.map(I => I.q);
 }
 
+/**
+ * Top of the head and the head's vertical axis, found by probing the body SDF (so it
+ * works for any morphed body). Returns null when there is no SDF.
+ */
+function headFromSDF(sdf) {
+  if (!sdf) return null;
+  const inside = (y) => {
+    const pts = [];
+    for (let x = -12; x <= 12; x += 1.5) for (let z = -16; z <= 22; z += 1.5) if (sdf.sample(x, y, z) < 0) pts.push([x, z]);
+    return pts;
+  };
+  let y = sdf.min[1] + (sdf.n[1] - 2) * sdf.cell;
+  while (y > sdf.min[1] && !inside(y).length) y -= 1;
+  if (y <= sdf.min[1]) return null;
+  const top = y, pts = inside(top - 10);
+  if (pts.length < 4) return null;
+  let cx = 0, cz = 0; for (const [x, z] of pts) { cx += x; cz += z; } cx /= pts.length; cz /= pts.length;
+  let r = 0; for (const [x, z] of pts) r = Math.max(r, Math.hypot(x - cx, z - cz));
+  return { top, axis: { c: [cx, 0, cz], a: [0, 1, 0] }, r: r + 1 };
+}
+
+/**
+ * Head pieces (e.g. GarmentCode's hood) are drafted standing tall above the neckline.
+ * Starting there, the hood topples to a random side before it reaches the head, so
+ * lower such panels until their top just clears the head, then wrap them around the
+ * head's axis with a little clearance, like torso panels around the body.
+ */
+function placeHeadPieces(panels, head) {
+  for (const q of panels) {
+    const P = q.P;
+    if (q.kind === ARM || q.p.map3d) continue;
+    let my = 0, maxY = -Infinity;
+    for (let i = 1; i < P.length; i += 3) { my += P[i]; maxY = Math.max(maxY, P[i]); }
+    my /= P.length / 3;
+    if (my < head.top - 12) continue;    // collars, lapels etc. stay around the neck
+    const dy = Math.max(0, maxY - (head.top + 2));
+    for (let i = 1; i < P.length; i += 3) P[i] -= dy;
+    if (wrapPanel(P, q.n0, head.axis, head.r + 2)) q.headAxis = head.axis;
+  }
+}
+
+/**
+ * Overlay panels: drafted parallel to a larger torso panel, a little in front of it and
+ * within its outline (e.g. a kangaroo pocket on the front). Wrapped on their own, a
+ * narrower panel bends more tightly and would start inside the panel it lies on, so it
+ * is wrapped with that panel's shape instead (sets q.under).
+ */
+function findOverlays(panels) {
+  const frame = (q) => {
+    const R = q.R, P = q.P, c = [0, 0, 0], n = P.length / 3;
+    for (let i = 0; i < P.length; i += 3) { c[0] += P[i] / n; c[1] += P[i + 1] / n; c[2] += P[i + 2] / n; }
+    return { c, e1: [R[0][0], R[1][0], R[2][0]], e2: [R[0][1], R[1][1], R[2][1]] };
+  };
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const cand = panels.filter(q => q.kind === BODY && !q.p.map3d && !q.headAxis);
+  for (const q of cand) q.fr = frame(q);
+  for (const q of cand) {
+    for (const b of cand) {
+      if (b === q || dot(q.n0, b.n0) < 0.98) continue;
+      // in front of b (away from the body axis), by a few cm
+      const out = Math.sign(dot([b.fr.c[0] - BODY_AXIS.c[0], 0, b.fr.c[2] - BODY_AXIS.c[2]], b.n0)) || 1;
+      const off = out * dot([q.fr.c[0] - b.fr.c[0], q.fr.c[1] - b.fr.c[1], q.fr.c[2] - b.fr.c[2]], b.n0);
+      if (off < 0.5 || off > 8) continue;
+      // within b's outline (bounding box in b's plane)
+      const box = (P, f) => {
+        let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+        for (let i = 0; i < P.length; i += 3) {
+          const r = [P[i] - b.fr.c[0], P[i + 1] - b.fr.c[1], P[i + 2] - b.fr.c[2]];
+          const x = dot(r, b.fr.e1), y = dot(r, b.fr.e2);
+          a0 = Math.min(a0, x); a1 = Math.max(a1, x); b0 = Math.min(b0, y); b1 = Math.max(b1, y);
+        }
+        return [a0, a1, b0, b1];
+      };
+      const qb = box(q.P), bb = box(b.P), tol = 1;
+      if (qb[0] < bb[0] - tol || qb[1] > bb[1] + tol || qb[2] < bb[2] - tol || qb[3] > bb[3] + tol) continue;
+      q.under = b;
+      break;
+    }
+  }
+  for (const q of cand) if (q.under && q.under.under) q.under = null;   // no chains
+}
+
 /** Build the simulation-ready garment from the exported GarmentCode pattern. */
 export function buildGarment(pattern, h, sdf, { armAxes = null, lift = pattern.lift ?? 7 } = {}) {
   // 1. mesh + place every panel
@@ -396,10 +489,21 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = pattern.l
     return { p, pi, pts, tris, P, flat, kind, n0, R };
   });
   if (armAxes) alignSleeves(panels, armAxes);
+  const head = headFromSDF(sdf);
+  if (head) placeHeadPieces(panels, head);
   const ring = new Set(placeSkirtRing(panels, pattern.stitches));
-  for (const q of panels) {
+  findOverlays(panels);
+  // panels lying on top of another one (e.g. a patch pocket) are wrapped after it
+  const order = panels.filter(q => !q.under).concat(panels.filter(q => q.under));
+  for (const q of order) {
     const { p, P, kind, n0 } = q;
     if (ring.has(q)) { q.axis = BODY_AXIS; continue; }
+    if (q.headAxis) { q.axis = q.headAxis; continue; }
+    if (q.under && q.under.wrap) {
+      q.wrap = wrapPanel(P, n0, q.under.axis, 9, false, q.under.wrap);
+      q.axis = q.under.axis;
+      continue;
+    }
     // One-leg panels (trousers) wrap around their own leg, everything else around the torso.
     let xMin = Infinity, xMax = -Infinity;
     for (let i = 0; i < P.length; i += 3) { xMin = Math.min(xMin, P[i]); xMax = Math.max(xMax, P[i]); }
@@ -409,7 +513,7 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = pattern.l
       const xc = (xMin + xMax) / 2;
       axis = { c: [xc, 0, BODY_AXIS.c[2]], a: BODY_AXIS.a };
       wrapPanel(P, n0, axis, 7);
-    } else if (kind !== ARM) { axis = BODY_AXIS; wrapPanel(P, n0, BODY_AXIS, 9, true); }
+    } else if (kind !== ARM) { axis = BODY_AXIS; q.wrap = wrapPanel(P, n0, BODY_AXIS, 9, true); }
     else if (armAxes) {   // sleeves: wrap around the arm on the panel's side
       let mx = 0; for (let i = 0; i < P.length; i += 3) mx += P[i];
       axis = (mx >= 0 ? armAxes.pos : armAxes.neg) || null;
