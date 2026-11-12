@@ -29,7 +29,7 @@ const el = (tag, attrs = {}, ...kids) => {
 const S = {
   mode: 'design', design: null, base: 'neutral', measurements: {}, unit: 'cm', detail: 'simple', search: '',
   locked: new Set(),
-  fabric: { id: 'cotton', color: '#c9d6ea', print: 'plain', bend: 0.55, stretch: 0.05, friction: 0.5, res: 2.0, release: false, selfCollide: false },
+  fabric: { id: 'cotton', color: '#c9d6ea', print: 'plain', bend: 0.55, stretch: 0.05, friction: 0.5, res: 2.0, release: false, selfCollide: true },
   template: 'tee',
   source: null,   // null = GarmentCode (Pyodide); else a FreeSewing design id (src/fs)
 };
