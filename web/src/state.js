@@ -1,5 +1,6 @@
 // App state snapshots: undo/redo, share links, saved designs, body profiles, autosave.
-// A snapshot is { design, base, measurements, fabric }.
+// A snapshot is { source, design, base, measurements, fabric }; source is null for
+// GarmentCode designs or a FreeSewing design id (then design is that design's option tree).
 
 export class History {
   constructor(limit = 100) { this.stack = []; this.i = -1; this.limit = limit; }
@@ -35,18 +36,21 @@ export function applyValues(design, values) {
   }
   return d;
 }
+const designDefaults = (source, defaults) => (source && defaults.isFS?.(source) ? defaults.fsDesign(source) : defaults.design);
 export function compactSnapshot(snap, defaults) {
-  const dv = designValues(snap.design), base = designValues(defaults.design);
+  const dv = designValues(snap.design), base = designValues(designDefaults(snap.source, defaults));
   const d = {};
   for (const [k, v] of Object.entries(dv)) if (JSON.stringify(v) !== JSON.stringify(base[k])) d[k] = v;
   const m = {};
   const bm = defaults.presets[snap.base] || {};
   for (const [k, v] of Object.entries(snap.measurements || {})) if (Math.abs(v - (bm[k] ?? NaN)) > 1e-6 || !(k in bm)) m[k] = Math.round(v * 100) / 100;
-  return { v: 1, d, b: snap.base, m, f: snap.fabric };
+  return { v: 1, ...(snap.source ? { s: snap.source } : {}), d, b: snap.base, m, f: snap.fabric };
 }
 export function expandSnapshot(c, defaults) {
+  const source = c.s && defaults.isFS?.(c.s) ? c.s : null;   // older links have no source: GarmentCode
   return {
-    design: applyValues(defaults.design, c.d || {}),
+    source,
+    design: applyValues(designDefaults(source, defaults), c.d || {}),
     base: c.b || 'neutral',
     measurements: { ...(defaults.presets[c.b || 'neutral'] || {}), ...(c.m || {}) },
     fabric: c.f || null,
