@@ -242,6 +242,113 @@ function alignSleeves(panels, armAxes) {
   }
 }
 
+/**
+ * Panelled ("gored") skirts: N panels sewn side to side in a ring, each with a waist edge.
+ * GarmentCode lays them out flat, and bending each panel around the body slice by slice
+ * mangles strongly flared panels (e.g. the default 4 panels): the slanted side seams of
+ * neighbours land in different places and the welded seams start crumpled. Instead
+ * place the whole ring as a cone: a flared panel is a piece of a cone's development,
+ * with its apex where the two side seams meet, so each point maps by its polar
+ * coordinates around that apex (distance below the waist -> slant, angle -> share of
+ * the turn). Neighbouring side seams then coincide, curved hems stay intact, and the
+ * placement is exact whenever the fabric fits a cone; fabric beyond a capped flare is
+ * folded into even radial flutes instead of being squeezed.
+ * Returns the placed panel records (empty if the pattern has no such ring).
+ */
+function placeSkirtRing(panels, stitches) {
+  const cand = panels.filter(q => q.kind === LEG && !q.p.map3d && q.p.labels && q.p.labels.lower_interface
+    && q.p.labels.lower_interface.length >= 2);
+  const N = cand.length;
+  if (N < 3) return [];
+  // the candidates must form one cycle of side seams; collect each panel's two side seams
+  const idx = new Map(cand.map((q, i) => [q.p.name, i]));
+  const sides = cand.map(() => []);
+  for (const s of stitches) {
+    const a = idx.get(s.a), b = idx.get(s.b);
+    if (a === undefined || b === undefined || a === b) continue;
+    sides[a].push(s.ia); sides[b].push(s.ib);
+  }
+  if (sides.some(l => l.length !== 2)) return [];
+
+  const [cx, , cz] = BODY_AXIS.c;
+  const info = [];
+  for (let n = 0; n < N; n++) {
+    const q = cand[n], { pts, p, P, R } = q, B = p.boundary;
+    const wl = p.labels.lower_interface;
+    let wx = 0, wyy = 0; for (const i of wl) { wx += pts[i][0]; wyy += pts[i][1]; } wx /= wl.length; wyy /= wl.length;
+    // side seams as lines (end to end); the one with the smaller x is "left"
+    const lines = sides[n].map(l => {
+      const a = B[l[0]], b = B[l[l.length - 1]];
+      let mx = 0; for (const i of l) mx += B[i][0];
+      return { a, b, mx: mx / l.length };
+    }).sort((u, v) => u.mx - v.mx);
+    // apex: where the two side lines meet (on the waist side for a flared panel)
+    const [L1, L2] = lines;
+    const d1 = [L1.b[0] - L1.a[0], L1.b[1] - L1.a[1]], d2 = [L2.b[0] - L2.a[0], L2.b[1] - L2.a[1]];
+    const den = d1[0] * d2[1] - d1[1] * d2[0];
+    if (Math.abs(den) < 1e-6 * Math.hypot(...d1) * Math.hypot(...d2)) return [];   // parallel sides: not a cone
+    const t = ((L2.a[0] - L1.a[0]) * d2[1] - (L2.a[1] - L1.a[1]) * d2[0]) / den;
+    const ap = [L1.a[0] + t * d1[0], L1.a[1] + t * d1[1]];
+    // the apex must lie beyond the waist, away from the panel (flaring towards the hem)
+    let my = 0, mxx = 0; for (const [x, y] of pts) { mxx += x; my += y; } mxx /= pts.length; my /= pts.length;
+    const toW = [wx - mxx, wyy - my], toA = [ap[0] - wx, ap[1] - wyy];
+    if (toW[0] * toA[0] + toW[1] * toA[1] <= 0) return [];
+    const ang = (x, y) => Math.atan2(x - ap[0], -(y - ap[1]) * Math.sign(wyy - my || 1));
+    // polar angles of the side lines (measured around the apex), left -> right
+    const phL = ang(...(Math.hypot(L1.a[0] - ap[0], L1.a[1] - ap[1]) > Math.hypot(L1.b[0] - ap[0], L1.b[1] - ap[1]) ? L1.a : L1.b));
+    const phR = ang(...(Math.hypot(L2.a[0] - ap[0], L2.a[1] - ap[1]) > Math.hypot(L2.b[0] - ap[0], L2.b[1] - ap[1]) ? L2.a : L2.b));
+    const Phi = Math.abs(phR - phL);
+    if (!(Phi > 0.01 && Phi < Math.PI)) return [];
+    let rhoW = 0; for (const i of wl) rhoW += Math.hypot(pts[i][0] - ap[0], pts[i][1] - ap[1]); rhoW /= wl.length;
+    // 3D waist height and the panel's angle around the body
+    let wy = 0; for (const i of wl) wy += P[3 * i + 1]; wy /= wl.length;
+    let sx = 0, sz = 0; for (let i = 0; i < P.length; i += 3) { sx += P[i] - cx; sz += P[i + 2] - cz; }
+    const pang = Math.atan2(sx, sz);
+    // does the panel's 2D +x run with increasing angle (anticlockwise seen from above)?
+    const sgn = (R[0][0] * Math.cos(pang) - R[2][0] * Math.sin(pang)) >= 0 ? 1 : -1;
+    info.push({ q, ap, ang, phL, phR, Phi, rhoW, wy, pang, sgn });
+  }
+  const sumPhi = info.reduce((a, I) => a + I.Phi, 0);
+  const rhoW = info.reduce((a, I) => a + I.rhoW, 0) / N;
+  const wy = info.reduce((a, I) => a + I.wy, 0) / N;
+  const Lw = rhoW * sumPhi, rW = Math.max(6, Lw / (2 * Math.PI));
+  // A cone holds the fabric exactly when sin(flare) = sumPhi / 2pi; beyond a cap the
+  // excess is folded into flutes.
+  const sinB = Math.min(Math.sin(0.5), sumPhi / (2 * Math.PI));
+  const cosB = Math.sqrt(1 - sinB * sinB);
+  let sMax = 0;
+  for (const I of info) for (const [x, y] of I.q.pts) sMax = Math.max(sMax, Math.hypot(x - I.ap[0], y - I.ap[1]) - I.rhoW);
+  const hemLen = (rhoW + sMax) * sumPhi;
+  const fluted = sumPhi / (2 * Math.PI) > sinB * 1.05;
+  const m = fluted ? N * Math.max(1, Math.round(hemLen / N / 45)) : 0;
+  info.sort((a, b) => a.pang - b.pang);
+  const share = 2 * Math.PI / N, a0 = info[0].pang;
+  info.forEach((I, i) => {
+    const { q } = I, P = q.P;
+    const th0 = a0 + i * share;
+    q.pts.forEach(([x, y], k) => {
+      const s = Math.max(0, Math.hypot(x - I.ap[0], y - I.ap[1]) - I.rhoW);
+      let f = (I.ang(x, y) - I.phL) / (I.phR - I.phL);
+      f = Math.min(1, Math.max(0, f));
+      if (I.sgn < 0) f = 1 - f;
+      const th = th0 + (f - 0.5) * share;
+      const r0 = rW + s * sinB, len = (rhoW + s) * sumPhi;
+      let r = r0;
+      if (m && len > 2 * Math.PI * r0) {
+        // sinusoidal flutes whose length matches the fabric (per wave ~ 4 x amplitude when deep)
+        const A = Math.min(0.8 * r0, Math.max(Math.sqrt(2 * ((len / (2 * Math.PI)) ** 2 - r0 * r0)) / m,
+          (len - 2 * Math.PI * r0) / (4 * m)));
+        r = r0 + A * Math.cos(m * (th - a0));
+      }
+      P[3 * k] = cx + r * Math.sin(th);
+      P[3 * k + 1] = wy - s * cosB;
+      P[3 * k + 2] = cz + r * Math.cos(th);
+    });
+    q.n0 = [Math.sin(th0), 0, Math.cos(th0)];
+  });
+  return info.map(I => I.q);
+}
+
 /** Build the simulation-ready garment from the exported GarmentCode pattern. */
 export function buildGarment(pattern, h, sdf, { armAxes = null, lift = 7 } = {}) {
   // 1. mesh + place every panel
@@ -279,11 +386,13 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = 7 } = {})
     const flat = new Float32Array(P);
     const kind = panelKind(p.label);
     const n0 = [R[0][2], R[1][2], R[2][2]];
-    return { p, pi, pts, tris, P, flat, kind, n0 };
+    return { p, pi, pts, tris, P, flat, kind, n0, R };
   });
   if (armAxes) alignSleeves(panels, armAxes);
+  const ring = new Set(placeSkirtRing(panels, pattern.stitches));
   for (const q of panels) {
     const { p, P, kind, n0 } = q;
+    if (ring.has(q)) { q.axis = BODY_AXIS; continue; }
     // One-leg panels (trousers) wrap around their own leg, everything else around the torso.
     let xMin = Infinity, xMax = -Infinity;
     for (let i = 0; i < P.length; i += 3) { xMin = Math.min(xMin, P[i]); xMax = Math.max(xMax, P[i]); }
