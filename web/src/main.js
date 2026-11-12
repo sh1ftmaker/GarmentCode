@@ -29,7 +29,7 @@ const el = (tag, attrs = {}, ...kids) => {
 const S = {
   mode: 'design', design: null, base: 'neutral', measurements: {}, unit: 'cm', detail: 'simple', search: '',
   locked: new Set(),
-  fabric: { id: 'cotton', color: '#c9d6ea', print: 'plain', bend: 0.55, stretch: 0.05, friction: 0.5, res: 2.0, release: false },
+  fabric: { id: 'cotton', color: '#c9d6ea', print: 'plain', bend: 0.55, stretch: 0.05, friction: 0.5, res: 2.0, release: false, selfCollide: true },   // LAB: self-collision on by default
   template: 'tee',
   source: null,   // null = GarmentCode (Pyodide); else a FreeSewing design id (src/fs)
 };
@@ -39,7 +39,6 @@ const viewer = new Viewer($('#three'));
 const bodies = {};            // base name -> { base, prep, sdfBuf }
 let sdf = null, sdfReady = Promise.resolve(), sdfToken = 0;
 let sim = null, pattern = null, genToken = 0, paused = false, flat = false;
-let selfCollide = true;   // LAB: cloth self-collision on/off (btn-selfcol)
 const cut = { pieces: null, layout: null, edited: false, key: '', sa: 1.5 };
 
 // ---------------------------------------------------------------- status & toasts
@@ -230,7 +229,7 @@ function startDrape() {
   }
   const g = buildGarment(pattern, S.fabric.res, sdf, { armAxes });
   viewer.setGarment(g);
-  sim = new ClothSim(g, sdf, { ...simParams(S.fabric), releaseAttachments: S.fabric.release, selfCollision: selfCollide });
+  sim = new ClothSim(g, sdf, { ...simParams(S.fabric), releaseAttachments: S.fabric.release, selfCollision: !!S.fabric.selfCollide });
   paused = false; flat = false;
   status(`Draping ${pattern.panels.length} panels…`, true);
   updateDrapeChip();
@@ -565,6 +564,7 @@ function renderFabricUI() {
   $('#print-select').value = S.fabric.print;
   $('#bend').value = S.fabric.bend; $('#stretch').value = S.fabric.stretch; $('#fric').value = S.fabric.friction; $('#res').value = S.fabric.res;
   $('#release-attach').checked = !!S.fabric.release;
+  $('#self-collide').checked = !!S.fabric.selfCollide;
   labelSliders();
 }
 function applyFabricLook() {
@@ -589,6 +589,7 @@ for (const [id, key] of [['bend', 'bend'], ['stretch', 'stretch'], ['fric', 'fri
   });
 }
 $('#release-attach').onchange = (e) => { S.fabric.release = e.target.checked; commitHistory(); startDrape(); };
+$('#self-collide').onchange = (e) => { S.fabric.selfCollide = e.target.checked; commitHistory(); startDrape(); };
 $('#print-select').onchange = (e) => { S.fabric.print = e.target.value; applyFabricLook(); commitHistory(); };
 
 // ---------------------------------------------------------------- cutting layout
@@ -743,12 +744,6 @@ $('#btn-fit').onclick = () => {
   frameCount = 0;
   if (on && sim) { fitBufS = sim.vertexStrain(); fitBufE = sim.vertexEase(); viewer.updateFitColors(fitBufS, fitBufE); }
   if (!on) applyFabricLook();
-};
-// LAB: compare with / without cloth self-collision; restarts the drape
-$('#btn-selfcol').onclick = () => {
-  selfCollide = !selfCollide;
-  $('#btn-selfcol').classList.toggle('on', selfCollide);
-  startDrape();
 };
 $('#btn-body').onclick = () => { const on = !$('#btn-body').classList.contains('on'); $('#btn-body').classList.toggle('on', on); viewer.showBody(on); };
 $('#btn-camera').onclick = () => { if (viewer.ok) viewer.resetCamera(); };
