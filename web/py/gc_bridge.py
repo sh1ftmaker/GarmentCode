@@ -114,7 +114,24 @@ class WebGarment:
     def default_design_json(self):
         return json.dumps(self.initial)
 
-    def randomize_locked(self, locked_json):
+    def randomize_locked(self, locked_json, max_tries=12):
+        """Random design (locked parameters kept) that GarmentCode can draft cleanly.
+
+        Like GarmentCode's own pattern randomizer (ParametrizedPattern._randomize_pattern),
+        samples whose panels self-intersect (e.g. a deep round neckline bulging past the
+        armhole) or that fail to draft are re-rolled.
+        """
+        for _ in range(max_tries):
+            self._randomize_locked_once(locked_json)
+            try:
+                self._build()
+            except Exception:
+                continue
+            if not self._intersecting_panels():
+                return
+        # give up: keep the last sample, the UI reports the problem
+
+    def _randomize_locked_once(self, locked_json):
         locked = json.loads(locked_json)
         keep = {}
         for path in locked:
@@ -166,15 +183,43 @@ class WebGarment:
                                    if isinstance(v, (int, float))}}, sort_keys=False)
 
     # ---------------- generation ----------------
-    def generate(self, resolution=1.5):
+    def _build_key(self):
+        return json.dumps([self.design, {k: v for k, v in self.body.params.items()
+                                         if isinstance(v, (int, float, str))}], sort_keys=True, default=str)
+
+    def _build(self):
+        key = self._build_key()
+        if self.garment is not None and getattr(self, '_built_key', None) == key:
+            return   # already drafted (e.g. while validating a random sample)
+        self._built_key = None
         self.garment = MetaGarment('Configured_design', self.body, self.design)
         self.pattern = self.garment.assembly()
-        try:
-            intersecting = bool(self.garment.is_self_intersecting())
-        except Exception:
-            intersecting = False
+        self._built_key = key
+
+    def _intersecting_panels(self):
+        """Names of panels whose outline crosses itself (GarmentCode's own check)."""
+        from pygarment.garmentcode.panel import Panel
+        bad = []
+
+        def walk(comp):
+            for sub in comp._get_subcomponents():
+                if isinstance(sub, Panel):
+                    try:
+                        if sub.is_self_intersecting():
+                            bad.append(sub.name)
+                    except Exception:
+                        pass
+                else:
+                    walk(sub)
+        walk(self.garment)
+        return bad
+
+    def generate(self, resolution=1.5):
+        self._build()
         out = self._export(resolution)
-        out['self_intersecting'] = intersecting
+        bad = self._intersecting_panels()
+        out['self_intersecting'] = bool(bad)
+        out['intersecting_panels'] = bad
         return json.dumps(out)
 
     @staticmethod

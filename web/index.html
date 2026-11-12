@@ -204,7 +204,10 @@
       </div>
       <div id="status" class="status"><span class="spinner"></span><span id="status-text">Starting…</span></div>
       <div id="sim-bar" class="sim-bar" hidden><div></div></div>
-      <div id="warn" class="toast warn" hidden></div>
+      <div id="warn" class="warn-chip" role="status" hidden>
+        <button type="button" class="warn-text" id="warn-text" title="Show the full message"></button>
+        <button type="button" class="warn-x" id="warn-x" aria-label="Dismiss">✕</button>
+      </div>
       <div id="toast" class="toast" hidden></div>
       <div id="pattern-card" class="pattern-card" hidden>
         <div class="card-head"><b>Sewing pattern</b><button id="pattern-close" class="icon-btn" aria-label="Close">✕</button></div>

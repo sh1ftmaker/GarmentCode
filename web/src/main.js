@@ -6,7 +6,7 @@ import { parseBodyBin, prepareMorph, morphBody } from './body.js';
 import { MEASUREMENTS, MEASUREMENT_GROUPS, ANGLE_KEYS, groupName, paramName, paramHelp, valueName, ESSENTIAL } from './labels.js';
 import { TEMPLATES, applyTemplate } from './templates.js';
 import { FABRICS, SWATCHES, simParams } from './fabric.js';
-import { buildPieces, sewingSteps } from './pieces.js';
+import { buildPieces, sewingSteps, pieceName } from './pieces.js';
 import { autoLayout, layoutLength, findProblems, placed } from './layout.js';
 import { primitives, toSVG, layoutPDF, tiledPDF, toDXF } from './export.js';
 import { History, compactSnapshot, expandSnapshot, encodeShare, decodeShare, saves, profiles, lastState, prefs } from './state.js';
@@ -43,7 +43,19 @@ const cut = { pieces: null, layout: null, edited: false, key: '', sa: 1.5 };
 function status(text, busy = false) { $('#status-text').textContent = text; $('#status').classList.toggle('idle', !busy); }
 let toastTimer;
 function toast(text, ms = 2800) { const t = $('#toast'); t.textContent = text; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, ms); }
-function warn(text) { const w = $('#warn'); w.hidden = !text; w.textContent = text || ''; }
+// Non-blocking notice: one collapsed line (tap to expand), dismissible. A dismissed
+// message stays hidden until a different one comes up.
+let warnDismissed = '';
+function warn(text) {
+  const w = $('#warn');
+  text = text || '';
+  w.classList.remove('open');
+  $('#warn-text').textContent = text;
+  w.hidden = !text || text === warnDismissed;
+  if (text !== warnDismissed) warnDismissed = '';
+}
+$('#warn-text').onclick = () => $('#warn').classList.toggle('open');
+$('#warn-x').onclick = () => { warnDismissed = $('#warn-text').textContent; $('#warn').hidden = true; };
 onPyProgress((t) => status(t, true));
 
 // ---------------------------------------------------------------- body
@@ -142,7 +154,11 @@ async function regenerate() {
   cut.key = '';
   const w = [];
   if (!pat.panels.length) w.push('Empty design: choose a top, waistband or bottom under “Garment”.');
-  if (pat.self_intersecting) w.push('Some panels self-intersect in this combination, so the drape may look odd.');
+  if (pat.self_intersecting) {
+    const names = [...new Set((pat.intersecting_panels || []).map(n => pieceName(n).replace(/ \((left|right)\)$/, '')))];
+    const list = names.map(n => n.toLowerCase()).join(' and ') || 'a panel';
+    w.push(`Pattern issue: the ${names.length > 1 ? 'outlines' : 'outline'} of the ${list} ${names.length > 1 ? 'cross themselves' : 'crosses itself'}, so the drape may look odd. Usually a neckline or armhole that's too deep or wide for this body.`);
+  }
   warn(w.join(' '));
   startDrape();
   if (!$('#pattern-card').hidden) refreshPatternSVG();
