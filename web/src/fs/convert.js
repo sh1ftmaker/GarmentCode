@@ -72,8 +72,15 @@ const reflect = (p, a, b) => {   // mirror p across the line a-b
  * Returns { edges: [{ id, poly, canon }], toLocal(pt) } where canon = +1 when the
  * loop runs along the edge's canonical direction, -1 otherwise.
  */
-export function pieceLoop(part, { fold = null, mirror = false } = {}) {
-  const raw = pathEdges(part.paths.seam);
+export function pieceLoop(part, { fold = null, mirror = false, half = null } = {}) {
+  let raw = pathEdges(part.paths.seam);
+  // a band folded lengthwise: one layer of half the width (local x or y halved)
+  if (half) {
+    const c = half === 'x' ? 0 : 1;
+    const lo = Math.min(...raw.filter(Boolean).flatMap(p => p.map(q => q[c]))), hi = Math.max(...raw.filter(Boolean).flatMap(p => p.map(q => q[c])));
+    const ref = Math.abs(lo) < Math.abs(hi) ? lo : hi;   // keep the edge nearest the origin
+    raw = raw.map(p => p && p.map(q => { const r = [q[0], q[1]]; r[c] = ref + (q[c] - ref) / 2; return r; }));
+  }
   const n = raw.length;
   let edges = [];
   if (fold == null) {
@@ -101,7 +108,13 @@ export function pieceLoop(part, { fold = null, mirror = false } = {}) {
 /**
  * @param {object} draft   drafted FreeSewing pattern (pattern.draft() result)
  * @param {object} spec    design adapter description:
- *   pieces: [{ name, part, fold?, mirror?, label?, place?(local)->map3d }]
+ *   pieces: [{ name, part, fold?, mirror?, label?, lining?, cutOnly?, doubled?, follow? }]
+ *     lining:  also cut a second, unsewn layer (exports only)
+ *     cutOnly: only cut (e.g. a patch pocket or a binding), not draped
+ *     doubled: 'x' | 'y', a band folded lengthwise: the drape uses one layer of half the width
+ *     follow:  snap the piece's 3D placement onto the pieces placed before it that it is
+ *              sewn to (sleeve caps onto armholes, hoods onto necklines, bands onto hems);
+ *              the number is how far (cm) into the piece the correction reaches (default 12)
  *   seams:  [{ a: [[piece, edge, rev?, from?, to?], ...], b: [...] }]  chains of edges (or the
  *           part from..to of an edge, canonical fractions) sewn along each other
  *   labels: { label: [[piece, edge], ...] }   (e.g. lower_interface = waist edges)
@@ -110,10 +123,11 @@ export function pieceLoop(part, { fold = null, mirror = false } = {}) {
  */
 export function convertDraft(draft, spec, { res = 1.5, place = null, attachLevels = {}, layers = false } = {}) {
   const parts = draft.parts[0];
-  const copies = spec.pieces.map((ps) => {
+  const drape = !!place;
+  const copies = spec.pieces.filter(ps => layers || !ps.cutOnly).map((ps) => {
     const part = parts[ps.part];
     if (!part) throw new Error(`FreeSewing part ${ps.part} is missing`);
-    const loop = pieceLoop(part, ps);
+    const loop = pieceLoop(part, { ...ps, half: drape ? ps.doubled : null });
     const byId = Object.fromEntries(loop.edges.map(e => [e.id, e]));
     for (const e of loop.edges) { e.cuts = new Set([0, 1]); e.nseg = new Map(); }
     return { ps, part, loop, byId };
@@ -129,7 +143,9 @@ export function convertDraft(draft, spec, { res = 1.5, place = null, attachLevel
   // 1. split seam chains into one-to-one segments
   const segs = [];
   const key = (f) => Math.round(f * 1e6) / 1e6;
+  const live = new Set(copies.map(c => c.ps.name));
   for (const seam of spec.seams) {
+    if (![...seam.a, ...seam.b].every(([piece]) => live.has(piece))) continue;   // e.g. a cut-only piece
     const chains = [seam.a, seam.b].map(ch => {
       const items = ch.map(([piece, id, rev, from = 0, to = 1]) => {
         const e = edgeOf(piece, id);
@@ -246,7 +262,64 @@ export function convertDraft(draft, spec, { res = 1.5, place = null, attachLevel
     // a second, identical layer (e.g. a lined pouch): cut, not draped
     if (layers && c.ps.lining) panels.push({ ...panel, name: `${c.ps.name}_lining`, labels: {}, map3d: undefined });
   }
+  if (place) snapFollowers(panels, stitches, copies);
   return { panels, stitches, attach_levels: attachLevels };
+}
+
+/**
+ * Pieces flagged `follow` are moved onto the pieces placed before them where they are
+ * sewn to them: each sewn boundary vertex is displaced onto its partner, and the rest of
+ * the piece moves with an inverse-distance blend of those displacements that fades out
+ * with the distance from the sewn edges (Gaussian, `follow` cm).
+ */
+function snapFollowers(panels, stitches, copies) {
+  const byName = Object.fromEntries(panels.map(p => [p.name, p]));
+  const order = new Map(copies.map((c, i) => [c.ps.name, i]));
+  const cache = new Map();
+  const posOf = (p) => {
+    if (!cache.has(p.name)) cache.set(p.name, p.boundary.map(([x, y]) => p.map3d(x, y)));
+    return cache.get(p.name);
+  };
+  for (const c of copies) {
+    if (!c.ps.follow) continue;
+    const p = byName[c.ps.name];
+    if (!p || !p.map3d) continue;
+    const me = order.get(p.name);
+    const acc = new Map();   // own boundary index -> summed target
+    for (const s of stitches) {
+      for (const [mine, other, im, io] of [[s.a, s.b, s.ia, s.ib], [s.b, s.a, s.ib, s.ia]]) {
+        if (mine !== p.name || other === p.name || !(order.get(other) < me) || !byName[other]?.map3d) continue;
+        const P = posOf(byName[other]);
+        for (let k = 0; k < im.length; k++) {
+          const t = P[io[k]], a = acc.get(im[k]) || [0, 0, 0, 0];
+          a[0] += t[0]; a[1] += t[1]; a[2] += t[2]; a[3]++;
+          acc.set(im[k], a);
+        }
+      }
+    }
+    if (!acc.size) continue;
+    const base = p.map3d;
+    const src = [];
+    for (const [i, a] of acc) {
+      const [x, y] = p.boundary[i], q = base(x, y);
+      src.push([x, y, a[0] / a[3] - q[0], a[1] / a[3] - q[1], a[2] / a[3] - q[2]]);
+    }
+    const lam = typeof c.ps.follow === 'number' ? c.ps.follow : 12;
+    p.map3d = (x, y) => {
+      const q = base(x, y);
+      let w = 0, dx = 0, dy = 0, dz = 0, dmin = Infinity;
+      for (const s of src) {
+        const d2 = (s[0] - x) ** 2 + (s[1] - y) ** 2;
+        if (d2 < 1e-10) return [q[0] + s[2], q[1] + s[3], q[2] + s[4]];
+        dmin = Math.min(dmin, d2);
+        const ww = 1 / (d2 * Math.sqrt(d2));
+        w += ww; dx += ww * s[2]; dy += ww * s[3]; dz += ww * s[4];
+      }
+      const f = Math.exp(-dmin / (lam * lam)) / w;
+      return [q[0] + dx * f, q[1] + dy * f, q[2] + dz * f];
+    };
+    cache.delete(p.name);
+  }
 }
 
 // ------------------------------------------------------------------ placement

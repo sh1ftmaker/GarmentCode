@@ -44,7 +44,7 @@ export function compactSnapshot(snap, defaults) {
   const m = {};
   const bm = defaults.presets[snap.base] || {};
   for (const [k, v] of Object.entries(snap.measurements || {})) if (Math.abs(v - (bm[k] ?? NaN)) > 1e-6 || !(k in bm)) m[k] = Math.round(v * 100) / 100;
-  return { v: 1, ...(snap.source ? { s: snap.source } : {}), d, b: snap.base, m, f: snap.fabric };
+  return { v: 2, ...(snap.source ? { s: snap.source } : {}), d, b: snap.base, m, f: snap.fabric };
 }
 export function expandSnapshot(c, defaults) {
   const source = c.s && defaults.isFS?.(c.s) ? c.s : null;   // older links have no source: GarmentCode
@@ -53,7 +53,8 @@ export function expandSnapshot(c, defaults) {
     design: applyValues(designDefaults(source, defaults), c.d || {}),
     base: c.b || 'neutral',
     measurements: { ...(defaults.presets[c.b || 'neutral'] || {}), ...(c.m || {}) },
-    fabric: c.f || null,
+    // v1 stored self-collision while it was off by default; let older saves pick up the new default
+    fabric: c.f ? ((c.v || 1) < 2 ? (({ selfCollide, ...f }) => f)(c.f) : c.f) : null,
   };
 }
 
