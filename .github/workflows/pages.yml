@@ -44,6 +44,22 @@ jobs:
           (cd lab-src/web && npm install --no-audit --no-fund)
           bash lab-src/web/tools/build_site.sh
           mv lab-src/_site _site/lab
+      # Frozen snapshot (branch legacy, right after the gored-skirt placement fix), at /legacy/
+      - name: Check out legacy branch
+        id: legacy
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          ref: legacy
+          path: legacy-src
+      - name: Build legacy site
+        if: steps.legacy.outcome == 'success'
+        run: |
+          (cd legacy-src/web && npm install --no-audit --no-fund)
+          bash legacy-src/web/tools/build_site.sh
+          # no service worker: its old cache strategy would fight the main site's cache
+          rm -f legacy-src/_site/sw.js
+          mv legacy-src/_site _site/legacy
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
