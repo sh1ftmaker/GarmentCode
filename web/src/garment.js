@@ -583,30 +583,45 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = pattern.l
 
   // 3. triangles, stretch edges and bending pairs (rest state from the 2D pattern)
   const index = [], stretch = [], stretchRest = [], stretchWarp = [], bend = [], bendRest = [], bendWarp = [], seamBend = [], seamBendRest = [], seamBendWarp = [];
-  const edgeSeen = new Map();
-  for (const q of panels) {
+  const edgeSeen = new Map(), triPanel = [];
+  for (const q of order) {   // overlays last, so their seams pair with the panels underneath first
     const d2 = (a, b) => Math.hypot(q.pts[a][0] - q.pts[b][0], q.pts[a][1] - q.pts[b][1]);
     for (let t = 0; t < q.tris.length; t += 3) {
       const loc = [q.tris[t], q.tris[t + 1], q.tris[t + 2]];
       const glob = loc.map(i => remap[q.base + i]);
       if (glob[0] === glob[1] || glob[1] === glob[2] || glob[0] === glob[2]) continue;
       index.push(...glob);
+      triPanel.push(q.pi);
       for (let e = 0; e < 3; e++) {
         const a = glob[e], b = glob[(e + 1) % 3];
         const key = a < b ? a * nv + b : b * nv + a;
-        const prev = edgeSeen.get(key);
-        if (prev === undefined) {
-          edgeSeen.set(key, { panel: q.pi, opp: loc[(e + 2) % 3], q, la: loc[e], lb: loc[(e + 1) % 3], ga: a, si: stretchRest.length });
+        const seen = edgeSeen.get(key);
+        const self = { panel: q.pi, opp: loc[(e + 2) % 3], q, la: loc[e], lb: loc[(e + 1) % 3], ga: a, si: seen ? seen[0].si : stretchRest.length };
+        if (seen === undefined) {
+          edgeSeen.set(key, [self]);
           stretch.push(a, b); stretchRest.push(d2(loc[e], loc[(e + 1) % 3]));
           const pa = q.pts[loc[e]], pb = q.pts[loc[(e + 1) % 3]];
           stretchWarp.push(edgeWarp(q.gv, pb[0] - pa[0], pb[1] - pa[1]) + (q.rib ? 2 : 0));   // angle to the grain (+2: ribbing)
-        } else if (prev && prev.panel === q.pi && (prev.la === loc[e] || prev.la === loc[(e + 1) % 3]) && (prev.lb === loc[e] || prev.lb === loc[(e + 1) % 3])) {
+          continue;
+        }
+        seen.push(self);
+        // Bend partner: the first earlier triangle on this edge that the fabric continues into.
+        // Layered pieces (a pocket caught in a seam on top of the panel it lies on) are not
+        // continuations: treated as one flat sheet, the pocket would be driven to fold out
+        // past the seam (e.g. down through a hem band), so they get no hinge between them.
+        // Nor does an overlay hinge onto the other panels of a seam it shares with the panel
+        // underneath (e.g. the hem band): that panel already continues across the seam, and a
+        // second hinge would pull the overlay into the same place, against the self-collision
+        // that keeps the layers apart. (Overlays come last, so the panel underneath is seen.)
+        if (q.under && seen.some(s => s.q === q.under)) continue;
+        const prev = seen.slice(0, -1).find(s => s.panel === q.pi || !(s.q.under === q || q.under === s.q));
+        if (!prev) continue;
+        if (prev.panel === q.pi && (prev.la === loc[e] || prev.la === loc[(e + 1) % 3]) && (prev.lb === loc[e] || prev.lb === loc[(e + 1) % 3])) {
           bend.push(remap[q.base + prev.opp], glob[(e + 2) % 3]);
           bendRest.push(d2(prev.opp, loc[(e + 2) % 3]));
           const po = q.pts[prev.opp], pc = q.pts[loc[(e + 2) % 3]];
           bendWarp.push(edgeWarp(q.gv, pc[0] - po[0], pc[1] - po[1]) + (q.rib ? 2 : 0));
-          edgeSeen.set(key, null);
-        } else if (prev) {
+        } else {
           // Across a seam: the two triangles live in different panels (or are joined by a seam
           // within one panel, e.g. a sleeve's underarm or a band closed into a ring). Rest shape = the hinge
           // unfolded flat, so seams resist bending like the rest of the fabric (as in a merged
@@ -628,7 +643,6 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = pattern.l
           // the pair runs across the seam: roughly along the normal of the seam edge in panel 1
           const ea = P1[a1], eb = P1[b1];
           seamBendWarp.push(edgeWarp(prev.q.gv, eb[1] - ea[1], ea[0] - eb[0]) + (prev.q.rib ? 2 : 0));
-          edgeSeen.set(key, null);
         }
       }
     }
@@ -663,7 +677,11 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = pattern.l
     }
   }
 
-  orientTriangles(index, nv, positions, sdf);
+  // an overlay is folded over the panel underneath along their shared seams: winding is
+  // carried over to it from its other seams (or set per piece) instead
+  const layerPairs = new Set();
+  for (const q of panels) if (q.under) { layerPairs.add(q.pi * 65536 + q.under.pi); layerPairs.add(q.under.pi * 65536 + q.pi); }
+  orientTriangles(index, nv, positions, sdf, (t, u) => layerPairs.has(triPanel[t] * 65536 + triPanel[u]));
 
   const g = {
     nv,
@@ -676,6 +694,8 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = pattern.l
     seamBendCount: seamBend.length / 2, bendWarp: new Float32Array(bendWarp.concat(seamBendWarp)),
     attach: new Uint32Array(attach), attachY: new Float32Array(attachY),
     collar: new Uint32Array(collar), collarX: new Float32Array(collarX),
+    // layered panels (overlay -> panel underneath), e.g. a pocket on the front
+    layers: panels.filter(q => q.under).map(q => [q.pi, q.under.pi]),
   };
   if (sdf) projectOut(g, sdf, 1.0, 6, axisOf);
   return g;
@@ -686,7 +706,7 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = pattern.l
  * facing away from the body. GarmentCode gives front and back panels the same normal,
  * so without this the two sides of a seam face opposite ways and the shading breaks.
  */
-function orientTriangles(index, nv, x, sdf) {
+function orientTriangles(index, nv, x, sdf, folded = null) {
   const nt = index.length / 3;
   const edgeTris = new Map();
   for (let t = 0; t < nt; t++) for (let e = 0; e < 3; e++) {
@@ -711,7 +731,7 @@ function orientTriangles(index, nv, x, sdf) {
       for (let e = 0; e < 3; e++) {
         const a = index[3 * t + e], b = index[3 * t + (e + 1) % 3];
         for (const u of edgeTris.get(a < b ? a * nv + b : b * nv + a)) {
-          if (done[u]) continue;
+          if (done[u] || (folded && folded(t, u))) continue;
           if (hasDir(u, a, b)) flip(u);   // neighbour must traverse the shared edge b->a
           done[u] = 1; comp[u] = ci; members.push(u);
         }
@@ -808,6 +828,12 @@ class SelfCollider {
     this.ringStart = rs; this.ring = new Int32Array(ring);
     this.stampR = new Int32Array(n).fill(-1);
     this.flat = g.flat; this.panelOf = g.panelOf; this.seam = g.seamVert;
+    // Layered panels (a pocket and the panel it lies on) are joined only along seams, so
+    // their particles next to a seam are mesh neighbours and would be exempt: there the
+    // layers could slip through each other. Keep those pairs apart (seam particles,
+    // shared by both layers, stay exempt).
+    this.layerPairs = new Set();
+    for (const [a, b] of g.layers || []) { this.layerPairs.add(a * 65536 + b); this.layerPairs.add(b * 65536 + a); }
     let ts = 1; while (ts < 2 * n) ts <<= 1;
     this.mask = ts - 1;
     this.cellStart = new Int32Array(ts + 1); this.cellEntries = new Int32Array(n); this.cellOf = new Int32Array(n);
@@ -842,7 +868,7 @@ class SelfCollider {
     }
     const r2 = radius * radius, th = this.th, th2 = th * th;
     const sR = this.stampR, rs = this.ringStart, ring = this.ring, OFF = SelfCollider.OFF, mask = this.mask;
-    const fl = this.flat, po = this.panelOf, seam = this.seam;
+    const fl = this.flat, po = this.panelOf, seam = this.seam, lay = this.layerPairs;
     let np = 0, pairs = this.pairs, minD = this.minD;
     for (let v = 0; v < n; v++) {
       for (let k = rs[v]; k < rs[v + 1]; k++) sR[ring[k]] = v;
@@ -858,7 +884,8 @@ class SelfCollider {
           const dx = xs[3 * e] - px, dy = xs[3 * e + 1] - py, dz = xs[3 * e + 2] - pz;
           if (dx * dx + dy * dy + dz * dz > r2) continue;
           const u = ce[e];
-          if ((o === 0 && u <= v) || sR[u] === v) continue;
+          if (o === 0 && u <= v) continue;
+          if (sR[u] === v && (seam[u] || seam[v] || po[u] === po[v] || !lay.has(po[u] * 65536 + po[v]))) continue;
           let md = th;
           if (po[u] === po[v] && !seam[u] && !seam[v]) {
             const fx = fl[3 * u] - fl[3 * v], fy = fl[3 * u + 1] - fl[3 * v + 1], fz = fl[3 * u + 2] - fl[3 * v + 2];

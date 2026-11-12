@@ -45,6 +45,7 @@ export class Viewer {
     key.shadow.mapSize.set(2048, 2048);
     Object.assign(key.shadow.camera, { left: -110, right: 110, top: 220, bottom: -10, near: 20, far: 800 });
     key.shadow.bias = -0.0004;
+    key.shadow.normalBias = 0.3;   // no shadow acne where cloth layers lie close (pockets)
     key.shadow.radius = 4;
     this.scene.add(key);
     const rim = new THREE.DirectionalLight(0xdfe8ff, 1.0);

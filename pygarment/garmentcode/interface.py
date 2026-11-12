@@ -221,7 +221,12 @@ class Interface:
             r['sec'][1] = enum - r['sec'][1]
             # Swap
             r['sec'][0], r['sec'][1] = r['sec'][1], r['sec'][0]
-        
+        # Keep the sections in edge order: projecting_lengths() concatenates them in list
+        # order, so with several sections (e.g. a hem made of two edges with their own
+        # ruffles) the lengths would otherwise come out reversed against the edges
+        # (fix in the unofficial web port; no effect with a single ruffle section)
+        self.ruffle.sort(key=lambda r: r['sec'][0])
+
         return self
 
     def flip_edges(self):
