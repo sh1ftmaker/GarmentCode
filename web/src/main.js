@@ -10,6 +10,7 @@ import { buildPieces, sewingSteps, pieceName, cutText } from './pieces.js';
 import { autoLayout, layoutLength, findProblems, regions, fabricToBuy } from './layout.js';
 import { primitives, fabricPrims, toSVG, layoutPDF, patternPDF, planSheet, PAPERS, toDXF, yardText } from './export.js';
 import { FS_DESIGNS, fsDefaults, isFS, fsPattern, fsSVG, fsSettings, fsRandomize } from './fs/index.js';
+import { armAxes as computeArmAxes } from './fs/place.js';   // arm axes, for wrapping sleeves
 import { History, compactSnapshot, expandSnapshot, encodeShare, decodeShare, saves, profiles, lastState, prefs } from './state.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -120,30 +121,6 @@ function tightLegOpening(pat) {
     if (leg > 0 && hem < leg + 1 && (!worst || leg - hem > worst.leg - worst.hem)) worst = { hem, leg };
   }
   return worst;
-}
-/** Principal axis of each arm (centroid + direction pointing to the hand), for wrapping sleeves. */
-function computeArmAxes(pos, part) {
-  const out = {};
-  for (const pid of [1, 2]) {
-    let n = 0, c = [0, 0, 0];
-    for (let v = 0; v < part.length; v++) if (part[v] === pid) { c[0] += pos[3 * v]; c[1] += pos[3 * v + 1]; c[2] += pos[3 * v + 2]; n++; }
-    if (!n) continue;
-    c = c.map(x => x / n);
-    let a = [c[0] >= 0 ? 1 : -1, -1, 0];   // power iteration on the covariance
-    for (let it = 0; it < 12; it++) {
-      const r = [0, 0, 0];
-      for (let v = 0; v < part.length; v++) {
-        if (part[v] !== pid) continue;
-        const dx = pos[3 * v] - c[0], dy = pos[3 * v + 1] - c[1], dz = pos[3 * v + 2] - c[2];
-        const d = dx * a[0] + dy * a[1] + dz * a[2];
-        r[0] += d * dx; r[1] += d * dy; r[2] += d * dz;
-      }
-      const l = Math.hypot(...r) || 1; a = r.map(x => x / l);
-    }
-    if (a[1] > 0) a = a.map(x => -x);        // point down the arm
-    out[c[0] >= 0 ? 'pos' : 'neg'] = { c, a };
-  }
-  return out;
 }
 let sdfWorker = null;
 function rebuildSDF() {
@@ -406,7 +383,7 @@ function renderFSDesignUI(root) {
   const A = FS_DESIGNS[S.source];
   root.append(el('div', { class: 'fs-note' },
     el('b', {}, A.name), ' · a ', el('a', { href: A.url, target: '_blank', rel: 'noopener' }, 'FreeSewing'),
-    ' design (MIT), drafted in your browser from your measurements. ', A.stretchNote));
+    ` design${A.author ? ` by ${A.author}` : ''} (MIT), drafted in your browser from your measurements. `, A.stretchNote));
   const q = S.search.trim().toLowerCase();
   for (const [g, node] of Object.entries(S.design)) {
     const body = el('div', { class: 'gbody' });

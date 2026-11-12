@@ -199,7 +199,7 @@ function alignSleeves(panels, armAxes) {
     const ax = sgn > 0 ? armAxes.pos : armAxes.neg;
     if (!ax) continue;
     const group = panels.filter(q => {
-      if (q.kind !== ARM) return false;
+      if (q.kind !== ARM || q.p.map3d) return false;   // pieces with their own placement (src/fs) are already along the arm
       let mx = 0; for (let i = 0; i < q.P.length; i += 3) mx += q.P[i];
       return mx * sgn > 0;
     });
@@ -357,7 +357,7 @@ function placeSkirtRing(panels, stitches) {
 }
 
 /** Build the simulation-ready garment from the exported GarmentCode pattern. */
-export function buildGarment(pattern, h, sdf, { armAxes = null, lift = 7 } = {}) {
+export function buildGarment(pattern, h, sdf, { armAxes = null, lift = pattern.lift ?? 7 } = {}) {
   // 1. mesh + place every panel
   const panels = pattern.panels.map((p, pi) => {
     const { pts, tris } = meshPanel(p.boundary, h);
@@ -469,12 +469,13 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = 7 } = {})
         if (prev === undefined) {
           edgeSeen.set(key, { panel: q.pi, opp: loc[(e + 2) % 3], q, la: loc[e], lb: loc[(e + 1) % 3], ga: a, si: stretchRest.length });
           stretch.push(a, b); stretchRest.push(d2(loc[e], loc[(e + 1) % 3]));
-        } else if (prev && prev.panel === q.pi) {
+        } else if (prev && prev.panel === q.pi && (prev.la === loc[e] || prev.la === loc[(e + 1) % 3]) && (prev.lb === loc[e] || prev.lb === loc[(e + 1) % 3])) {
           bend.push(remap[q.base + prev.opp], glob[(e + 2) % 3]);
           bendRest.push(d2(prev.opp, loc[(e + 2) % 3]));
           edgeSeen.set(key, null);
         } else if (prev) {
-          // Across a seam: the two triangles live in different panels. Rest shape = the hinge
+          // Across a seam: the two triangles live in different panels (or are joined by a seam
+          // within one panel, e.g. a sleeve's underarm or a band closed into a ring). Rest shape = the hinge
           // unfolded flat, so seams resist bending like the rest of the fabric (as in a merged
           // BoxMesh) instead of acting as free hinges that crease.
           const P1 = prev.q.pts, P2 = q.pts;

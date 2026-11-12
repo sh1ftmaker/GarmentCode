@@ -19,6 +19,7 @@ export function pieceName(raw) {
   if (!name) name = s.replace(/[_-]+/g, ' ');
   const level = raw.match(/(\d+)/);
   if (level && !/panel/.test(raw)) name += ` ${+level[1] + 1}`;
+  if (/_lining$/.test(raw) && !/lining/.test(name)) name += ' lining';
   if (/panel_(\d+)/.test(raw)) name = `${name.replace(/panel \d+/, '').trim() || 'skirt'} panel ${+raw.match(/panel_(\d+)/)[1] + 1}`;
   name = name.charAt(0).toUpperCase() + name.slice(1);
   return side ? `${name} (${side})` : name;
@@ -106,7 +107,11 @@ export function buildPieces(data, { sa = 1.5, note = '' } = {}) {
     const s = { ...s0, ia: fix(A, s0.ia), ib: fix(B, s0.ib) };
     const len = polyLen(A.sew, s.ia);
     const lenB = polyLen(B.sew, s.ib);
-    seams.push({ n: k + 1, a: A, b: B, len });
+    // within one piece: a dart when the two legs meet at a tip, else the piece is closed into a
+    // tube or ring (a sleeve's underarm, a band's ends)
+    const ends = [s.ia[0], s.ia[s.ia.length - 1]];
+    const dart = A === B && (ends.includes(s.ib[0]) || ends.includes(s.ib[s.ib.length - 1]));
+    seams.push({ n: k + 1, a: A, b: B, len, dart });
     const count = /back/i.test(A.name + B.name) ? 2 : 1;
     for (const [P, idxs, l] of [[A, s.ia, len], [B, s.ib, lenB]]) {
       const mid = outward(P.sew, pointAlong(P.sew, idxs, 0.5));
@@ -285,12 +290,15 @@ export function sewingSteps({ seams }) {
     if (x.id === y.id) { x.dartCat = true; }
     const key = `${x.id}|${y.id}`;
     // darts first, then seams by garment region
-    if (!groups.has(key)) groups.set(key, { x, y, nums: [], len: 0, cat: x.id === y.id ? -1 : Math.max(x.cat, y.cat) * 10 + Math.min(x.cat, y.cat) });
+    if (!groups.has(key)) groups.set(key, { x, y, nums: [], len: 0, dart: !!s.dart, cat: x.id === y.id ? -1 : Math.max(x.cat, y.cat) * 10 + Math.min(x.cat, y.cat) });
     const g = groups.get(key);
+    g.dart = g.dart && !!s.dart;
     g.nums.push(s.n); g.len += s.len;
   }
   const order = [...groups.values()].sort((a, b) => a.cat - b.cat || a.nums[0] - b.nums[0]);
-  const steps = order.map(g => g.x.id === g.y.id
+  const steps = order.map(g => g.x.id === g.y.id && !g.dart
+    ? `Close <b>${g.x.name}</b> into a tube or ring (seam${g.nums.length > 1 ? 's' : ''} ${g.nums.join(', ')}, ${Math.round(g.len)} cm).`
+    : g.x.id === g.y.id
     ? `Sew the dart${g.nums.length > 2 ? 's' : ''} in <b>${g.x.name}</b> (seam${g.nums.length > 1 ? 's' : ''} ${g.nums.join(', ')}).`
     : `Sew <b>${g.x.name}</b> to <b>${g.y.name}</b>, matching seam${g.nums.length > 1 ? 's' : ''} ${g.nums.join(', ')} (${Math.round(g.len)} cm).`);
   steps.push('Finish the remaining raw edges (hems, neckline, armholes) with your preferred method.');
