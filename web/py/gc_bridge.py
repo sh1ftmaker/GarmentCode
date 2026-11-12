@@ -198,6 +198,26 @@ class WebGarment:
                 return svgpath.CubicBezier(*pat_utils.list_to_c([start, *cps, end]))
         return svgpath.Line(*pat_utils.list_to_c([start, end]))
 
+    @staticmethod
+    def _arc_samples(c, n):
+        """n points (start included, end excluded) evenly spaced by arc length.
+
+        Stitched edges are welded point-by-point, so both sides of a seam must be
+        sampled at matching arc-length fractions; sampling by curve parameter makes
+        the two sides disagree and the seam ripples."""
+        if n <= 1 or isinstance(c, svgpath.Line):
+            return [c.point(i / n) for i in range(n)]
+        m = max(64, 16 * n)
+        ts = np.linspace(0.0, 1.0, m + 1)
+        pts = np.array([c.point(t) for t in ts])
+        seg = np.abs(np.diff(pts))
+        cum = np.concatenate([[0.0], np.cumsum(seg)])
+        if cum[-1] <= 0:
+            return [c.point(i / n) for i in range(n)]
+        targets = cum[-1] * np.arange(n) / n
+        t_at = np.interp(targets, cum, ts)
+        return [c.point(float(t)) for t in t_at]
+
     def _export(self, res):
         spec = self.pattern.pattern
         panels = spec['panels']
@@ -233,8 +253,7 @@ class WebGarment:
                 c = curves[(pname, ei)]
                 n = nseg[(pname, ei)]
                 first = len(loop)
-                for i in range(n):
-                    z = c.point(i / n)
+                for z in self._arc_samples(c, n):
                     loop.append([float(z.real), float(z.imag)])
                 ranges.append([first, n])
             total = len(loop)

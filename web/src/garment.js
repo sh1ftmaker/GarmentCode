@@ -241,7 +241,7 @@ export function buildGarment(pattern, h, sdf, { armAxes = null } = {}) {
   for (let v = 0; v < nv; v++) for (let c = 0; c < 3; c++) { positions[3 * v + c] /= cnt[v]; flat[3 * v + c] /= cnt[v]; }
 
   // 3. triangles, stretch edges and bending pairs (rest state from the 2D pattern)
-  const index = [], stretch = [], stretchRest = [], bend = [], bendRest = [];
+  const index = [], stretch = [], stretchRest = [], bend = [], bendRest = [], seamBend = [], seamBendRest = [];
   const edgeSeen = new Map();
   for (const q of panels) {
     const d2 = (a, b) => Math.hypot(q.pts[a][0] - q.pts[b][0], q.pts[a][1] - q.pts[b][1]);
@@ -255,11 +255,30 @@ export function buildGarment(pattern, h, sdf, { armAxes = null } = {}) {
         const key = a < b ? a * nv + b : b * nv + a;
         const prev = edgeSeen.get(key);
         if (prev === undefined) {
-          edgeSeen.set(key, { panel: q.pi, opp: loc[(e + 2) % 3], q });
+          edgeSeen.set(key, { panel: q.pi, opp: loc[(e + 2) % 3], q, la: loc[e], lb: loc[(e + 1) % 3], ga: a, si: stretchRest.length });
           stretch.push(a, b); stretchRest.push(d2(loc[e], loc[(e + 1) % 3]));
         } else if (prev && prev.panel === q.pi) {
           bend.push(remap[q.base + prev.opp], glob[(e + 2) % 3]);
           bendRest.push(d2(prev.opp, loc[(e + 2) % 3]));
+          edgeSeen.set(key, null);
+        } else if (prev) {
+          // Across a seam: the two triangles live in different panels. Rest shape = the hinge
+          // unfolded flat, so seams resist bending like the rest of the fabric (as in a merged
+          // BoxMesh) instead of acting as free hinges that crease.
+          const P1 = prev.q.pts, P2 = q.pts;
+          const dd = (P, i, j) => Math.hypot(P[i][0] - P[j][0], P[i][1] - P[j][1]);
+          // local ids of the shared edge in each panel, matched by global vertex
+          const a1 = prev.ga === a ? prev.la : prev.lb, b1 = prev.ga === a ? prev.lb : prev.la;
+          const a2 = loc[e], b2 = loc[(e + 1) % 3], c2 = loc[(e + 2) % 3];
+          const L = dd(P1, a1, b1) || 1e-6;
+          const ac = dd(P1, a1, prev.opp), bc = dd(P1, b1, prev.opp);
+          const ad = dd(P2, a2, c2), bd = dd(P2, b2, c2);
+          const xc = (L * L + ac * ac - bc * bc) / (2 * L), yc = Math.sqrt(Math.max(0, ac * ac - xc * xc));
+          const xd = (L * L + ad * ad - bd * bd) / (2 * L), yd = -Math.sqrt(Math.max(0, ad * ad - xd * xd));
+          // a seam edge's rest length is shared by both sides, so ease is split between them
+          stretchRest[prev.si] = 0.5 * (L + dd(P2, a2, b2));
+          seamBend.push(remap[prev.q.base + prev.opp], glob[(e + 2) % 3]);
+          seamBendRest.push(Math.hypot(xc - xd, yc - yd));
           edgeSeen.set(key, null);
         }
       }
@@ -301,7 +320,8 @@ export function buildGarment(pattern, h, sdf, { armAxes = null } = {}) {
     index: nv > 65535 ? new Uint32Array(index) : new Uint16Array(index),
     armpitY: (levels.strapless_top || 130) - 2,
     stretch: new Uint32Array(stretch), stretchRest: new Float32Array(stretchRest),
-    bend: new Uint32Array(bend), bendRest: new Float32Array(bendRest),
+    bend: new Uint32Array(bend.concat(seamBend)), bendRest: new Float32Array(bendRest.concat(seamBendRest)),
+    seamBendCount: seamBend.length / 2,
     attach: new Uint32Array(attach), attachY: new Float32Array(attachY),
     collar: new Uint32Array(collar), collarX: new Float32Array(collarX),
   };
@@ -341,7 +361,7 @@ export class ClothSim {
     this.cpush = new Float32Array(g.nv);      // last contact correction depth (0 = no contact)
     this.opts = Object.assign({
       substeps: 12, stretchIters: 2, gravity: 981, thickness: 0.6, friction: 0.5,
-      bendCompliance: 2e-6, stretchCompliance: 0, damping: 0.8,
+      bendCompliance: 2e-6, stretchCompliance: 0, damping: 0.8, seamBendFactor: 0.15,
       zeroGravityFrames: 10,                       // as in GarmentCode's sim config
       relaxFrames: 30,                             // momentum-free settling of the sewn start state
       maxVelocity: 250,                            // cm/s clamp (GarmentCode: global_max_velocity)
@@ -413,7 +433,10 @@ export class ClothSim {
         x[i] += v[i] * dt; x[i + 1] += v[i + 1] * dt; x[i + 2] += v[i + 2] * dt;
       }
       for (let k = 0; k < o.stretchIters; k++) this._solveDist(g.stretch, g.stretchRest, stretchAlpha);
-      this._solveDist(g.bend, g.bendRest, bendAlpha);
+      // regular bending, then seams (seam allowances make the seam line stiffer than the cloth)
+      const k0 = g.bendRest.length - (g.seamBendCount || 0);
+      this._solveDist(g.bend.subarray(0, 2 * k0), g.bendRest.subarray(0, k0), bendAlpha);
+      if (g.seamBendCount) this._solveDist(g.bend.subarray(2 * k0), g.bendRest.subarray(k0), bendAlpha * o.seamBendFactor);
 
       if (this.t < this.attachEnd) {
         const ak = o.attachStiffness;
