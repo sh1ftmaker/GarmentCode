@@ -23,27 +23,43 @@ function distToSegSq(px, py, ax, ay, bx, by) {
   return qx * qx + qy * qy;
 }
 
-/** Triangulate a panel outline with roughly uniform interior sampling. */
-export function meshPanel(boundary, h) {
+/**
+ * Triangulate a panel outline with roughly uniform interior sampling. With a grain vector
+ * (grain.js), the interior points form a square lattice along the warp and weft, so the
+ * mesh has warp, weft and bias (diagonal) edges like the threads of the cloth and the
+ * stretch compliance per edge can model a woven's anisotropy. Without one: a hexagonal
+ * lattice.
+ */
+export function meshPanel(boundary, h, grain = null) {
   const n = boundary.length;
+  // lattice frame: (u, v) = (across the grain, along the grain)
+  const [gx, gy] = grain || [0, 1];
+  const toL = ([x, y]) => [x * gy - y * gx, x * gx + y * gy];
+  const fromL = (u, v) => [u * gy + v * gx, -u * gx + v * gy];
+  const B = boundary.map(toL);
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const [x, y] of boundary) {
+  for (const [x, y] of B) {
     minX = Math.min(minX, x); minY = Math.min(minY, y);
     maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
   }
   const pts = boundary.map(p => [p[0], p[1]]);
   const keep2 = (0.6 * h) ** 2;
-  const dy = h * Math.sqrt(3) / 2;
+  // same vertex density either way (hexagonal cell 0.866 h², square cell a²)
+  const sq = !!grain, a = sq ? 0.93 * h : h;
+  const dy = sq ? a : h * Math.sqrt(3) / 2;
+  // lattice phase anchored at the origin of the frame, so neighbouring pieces line up alike
+  const y0 = sq ? Math.ceil(minY / dy) * dy + dy / 2 : minY + dy / 2;
   let row = 0;
-  for (let y = minY + dy / 2; y < maxY; y += dy, row++) {
-    for (let x = minX + (row % 2 ? h / 2 : 0); x < maxX; x += h) {
-      if (!pointInPolygon(x, y, boundary)) continue;
+  for (let y = y0; y < maxY; y += dy, row++) {
+    const x0 = sq ? Math.ceil(minX / a) * a + a / 2 : minX + (row % 2 ? h / 2 : 0);
+    for (let x = x0; x < maxX; x += a) {
+      if (!pointInPolygon(x, y, B)) continue;
       let ok = true;
       for (let i = 0; i < n && ok; i++) {
-        const a = boundary[i], b = boundary[(i + 1) % n];
-        if (distToSegSq(x, y, a[0], a[1], b[0], b[1]) < keep2) ok = false;
+        const p = B[i], q = B[(i + 1) % n];
+        if (distToSegSq(x, y, p[0], p[1], q[0], q[1]) < keep2) ok = false;
       }
-      if (ok) pts.push([x, y]);
+      if (ok) pts.push(fromL(x, y));
     }
   }
   const flat = new Float64Array(pts.length * 2);
@@ -362,7 +378,7 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = pattern.l
   const grains = pieceGrains(pattern, grain);   // grain direction per panel (grain.js)
   // 1. mesh + place every panel
   const panels = pattern.panels.map((p, pi) => {
-    const { pts, tris } = meshPanel(p.boundary, h);
+    const { pts, tris } = meshPanel(p.boundary, h, grains[p.name].vec);   // lattice along the grain
     const R = p.rotation, T = p.translation;
     const P = new Float32Array(pts.length * 3);
     pts.forEach(([x, y], i) => {
@@ -395,7 +411,7 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = pattern.l
     const flat = new Float32Array(P);
     const kind = panelKind(p.label);
     const n0 = [R[0][2], R[1][2], R[2][2]];
-    return { p, pi, pts, tris, P, flat, kind, n0, R, gv: grains[p.name].vec };
+    return { p, pi, pts, tris, P, flat, kind, n0, R, gv: grains[p.name].vec, rib: grains[p.name].rib };
   });
   if (armAxes) alignSleeves(panels, armAxes);
   const ring = new Set(placeSkirtRing(panels, pattern.stitches));
@@ -456,7 +472,7 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = pattern.l
   for (let v = 0; v < nv; v++) for (let c = 0; c < 3; c++) { positions[3 * v + c] /= cnt[v]; flat[3 * v + c] /= cnt[v]; }
 
   // 3. triangles, stretch edges and bending pairs (rest state from the 2D pattern)
-  const index = [], stretch = [], stretchRest = [], stretchWarp = [], bend = [], bendRest = [], seamBend = [], seamBendRest = [];
+  const index = [], stretch = [], stretchRest = [], stretchWarp = [], bend = [], bendRest = [], bendWarp = [], seamBend = [], seamBendRest = [], seamBendWarp = [];
   const edgeSeen = new Map();
   for (const q of panels) {
     const d2 = (a, b) => Math.hypot(q.pts[a][0] - q.pts[b][0], q.pts[a][1] - q.pts[b][1]);
@@ -473,10 +489,12 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = pattern.l
           edgeSeen.set(key, { panel: q.pi, opp: loc[(e + 2) % 3], q, la: loc[e], lb: loc[(e + 1) % 3], ga: a, si: stretchRest.length });
           stretch.push(a, b); stretchRest.push(d2(loc[e], loc[(e + 1) % 3]));
           const pa = q.pts[loc[e]], pb = q.pts[loc[(e + 1) % 3]];
-          stretchWarp.push(edgeWarp(q.gv, pb[0] - pa[0], pb[1] - pa[1]));   // angle to the grain
+          stretchWarp.push(edgeWarp(q.gv, pb[0] - pa[0], pb[1] - pa[1]) + (q.rib ? 2 : 0));   // angle to the grain (+2: ribbing)
         } else if (prev && prev.panel === q.pi && (prev.la === loc[e] || prev.la === loc[(e + 1) % 3]) && (prev.lb === loc[e] || prev.lb === loc[(e + 1) % 3])) {
           bend.push(remap[q.base + prev.opp], glob[(e + 2) % 3]);
           bendRest.push(d2(prev.opp, loc[(e + 2) % 3]));
+          const po = q.pts[prev.opp], pc = q.pts[loc[(e + 2) % 3]];
+          bendWarp.push(edgeWarp(q.gv, pc[0] - po[0], pc[1] - po[1]) + (q.rib ? 2 : 0));
           edgeSeen.set(key, null);
         } else if (prev) {
           // Across a seam: the two triangles live in different panels (or are joined by a seam
@@ -497,6 +515,9 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = pattern.l
           stretchRest[prev.si] = 0.5 * (L + dd(P2, a2, b2));
           seamBend.push(remap[prev.q.base + prev.opp], glob[(e + 2) % 3]);
           seamBendRest.push(Math.hypot(xc - xd, yc - yd));
+          // the pair runs across the seam: roughly along the normal of the seam edge in panel 1
+          const ea = P1[a1], eb = P1[b1];
+          seamBendWarp.push(edgeWarp(prev.q.gv, eb[1] - ea[1], ea[0] - eb[0]) + (prev.q.rib ? 2 : 0));
           edgeSeen.set(key, null);
         }
       }
@@ -542,7 +563,7 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = pattern.l
     stretch: new Uint32Array(stretch), stretchRest: new Float32Array(stretchRest), stretchWarp: new Float32Array(stretchWarp),
     grain: Object.fromEntries(panels.map(q => [q.p.name, grains[q.p.name]])),
     bend: new Uint32Array(bend.concat(seamBend)), bendRest: new Float32Array(bendRest.concat(seamBendRest)),
-    seamBendCount: seamBend.length / 2,
+    seamBendCount: seamBend.length / 2, bendWarp: new Float32Array(bendWarp.concat(seamBendWarp)),
     attach: new Uint32Array(attach), attachY: new Float32Array(attachY),
     collar: new Uint32Array(collar), collarX: new Float32Array(collarX),
   };
@@ -778,6 +799,15 @@ SelfCollider.OFF = (() => {
 })();
 
 // ---------------------------------------------------------------------------
+// Stretch compliance of an edge from its warp share w (see grain.js edgeWarp; w >= 2 marks a
+// ribbing edge, w - 2 its warp share): warp / weft / bias of the fabric, or of the rib knit.
+function edgeComp(w, o) {
+  const cw = o.stretchCompliance;
+  if (w >= 2 && o.ribCompliance) return edgeCompliance(w - 2, ...o.ribCompliance);
+  return edgeCompliance(w >= 2 ? w - 2 : w, cw, o.weftCompliance ?? cw, o.biasCompliance ?? cw);
+}
+const compKey = (o) => [o.stretchCompliance, o.weftCompliance, o.biasCompliance, o.ribCompliance].join('|');
+
 // XPBD-style solver: small substeps, stretch + bending distance constraints,
 // gentle half-space attachments, body SDF collision with Coulomb-like friction.
 export class ClothSim {
@@ -829,12 +859,11 @@ export class ClothSim {
   /** Per-constraint stretch compliance (/dt²) from each edge's angle to its panel's grain. */
   _stretchAlpha(dt) {
     const o = this.opts, g = this.g;
-    const cw = o.stretchCompliance, cf = o.weftCompliance ?? cw, cb = o.biasCompliance ?? cw;
-    const key = `${cw}|${cf}|${cb}|${dt}`;
+    const key = `${compKey(o)}|${dt}`;
     if (this._alphaKey === key) return this._alpha;
     const n = g.stretchRest.length, w = g.stretchWarp, inv = 1 / (dt * dt);
     const a = this._alpha && this._alpha.length === n ? this._alpha : new Float32Array(n);
-    for (let c = 0; c < n; c++) a[c] = edgeCompliance(w ? w[c] : 1, cw, cf, cb) * inv;
+    for (let c = 0; c < n; c++) a[c] = edgeComp(w ? w[c] : 1, o) * inv;
     this._alpha = a; this._alphaKey = key;
     return a;
   }
@@ -847,6 +876,42 @@ export class ClothSim {
       const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
       if (len < 1e-9) continue;
       const corr = (len - rest[c >> 1]) / len / (2 + alpha[c >> 1]);
+      x[a] += dx * corr; x[a + 1] += dy * corr; x[a + 2] += dz * corr;
+      x[b] -= dx * corr; x[b + 1] -= dy * corr; x[b + 2] -= dz * corr;
+    }
+  }
+
+  /**
+   * Bending pairs (opposite vertices of two triangles) as [compliance when shorter than
+   * flat, compliance when longer] per pair (/dt²). Shorter = the hinge folds: bending
+   * stiffness (seams stiffer). Longer than flat can only be in-plane strain, which a
+   * woven resists along the threads and gives on the bias: the larger of the bending and
+   * the pair's own stretch compliance, so bending pairs don't lock the fabric's shear.
+   */
+  _bendAlpha(dt) {
+    const o = this.opts, g = this.g;
+    const key = `${o.bendCompliance}|${o.seamBendFactor}|${compKey(o)}|${dt}`;
+    if (this._bendKey === key) return this._bendA;
+    const n = g.bendRest.length, k0 = n - (g.seamBendCount || 0), w = g.bendWarp, inv = 1 / (dt * dt);
+    const a = this._bendA && this._bendA.length === 2 * n ? this._bendA : new Float32Array(2 * n);
+    for (let c = 0; c < n; c++) {
+      const lo = o.bendCompliance * (c < k0 ? 1 : o.seamBendFactor) * inv;
+      a[2 * c] = lo;
+      a[2 * c + 1] = Math.max(lo, w ? edgeComp(w[c], o) * inv : lo);
+    }
+    this._bendA = a; this._bendKey = key;
+    return a;
+  }
+
+  _solveBend(idx, rest, alpha) {
+    const x = this.x;
+    for (let c = 0; c < idx.length; c += 2) {
+      const a = 3 * idx[c], b = 3 * idx[c + 1];
+      const dx = x[b] - x[a], dy = x[b + 1] - x[a + 1], dz = x[b + 2] - x[a + 2];
+      const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (len < 1e-9) continue;
+      const C = len - rest[c >> 1];
+      const corr = C / len / (2 + alpha[C > 0 ? c + 1 : c]);
       x[a] += dx * corr; x[a + 1] += dy * corr; x[a + 2] += dz * corr;
       x[b] -= dx * corr; x[b + 1] -= dy * corr; x[b + 2] -= dz * corr;
     }
@@ -870,7 +935,6 @@ export class ClothSim {
     const o = this.opts, g = this.g, n = g.nv;
     const dt = frameDt / o.substeps;
     const x = this.x, p = this.p, v = this.v, sdf = this.sdf, grad = this._g;
-    const bendAlpha = o.bendCompliance / (dt * dt);
     const stretchAlpha = this._stretchAlpha(dt);
     const gy = this.frame < Math.max(o.zeroGravityFrames, o.relaxFrames) ? 0 : -o.gravity * dt;
     const damp = Math.max(0, 1 - o.damping * dt);
@@ -899,9 +963,7 @@ export class ClothSim {
       }
       for (let k = 0; k < o.stretchIters; k++) this._solveStretch(g.stretch, g.stretchRest, stretchAlpha);
       // regular bending, then seams (seam allowances make the seam line stiffer than the cloth)
-      const k0 = g.bendRest.length - (g.seamBendCount || 0);
-      this._solveDist(g.bend.subarray(0, 2 * k0), g.bendRest.subarray(0, k0), bendAlpha);
-      if (g.seamBendCount) this._solveDist(g.bend.subarray(2 * k0), g.bendRest.subarray(k0), bendAlpha * o.seamBendFactor);
+      this._solveBend(g.bend, g.bendRest, this._bendAlpha(dt));
 
       if (this.t < this.attachEnd) {
         // Waist / strapless lines: a one-sided floor (an edge may settle down to the line, never

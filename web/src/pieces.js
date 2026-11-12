@@ -1,6 +1,7 @@
 // Pattern pieces for cutting: seam allowance, notches, seam numbers, grainline, names.
 // Input is the fine export from the Python bridge (gc.pieces): panel outlines in cm,
 // edge vertex ranges and stitches.
+import { pieceGrains } from './grain.js';
 
 const TOKENS = [
   [/ins_skirt_front/, 'godet front'], [/ins_skirt_back/, 'godet back'], [/ftorso/, 'front bodice'], [/btorso/, 'back bodice'], [/sleeve_f/, 'sleeve front'], [/sleeve_b/, 'sleeve back'],
@@ -50,31 +51,24 @@ function offsetPolygon(pts, d) {
   return best.map(p => [p.X / S, p.Y / S]);
 }
 
-/** Rotate an arm panel by ±90° so that the end sewn to the bodice (the cap) is on top. */
-function turnArm(sew, name, data) {
-  const panels = Object.fromEntries(data.panels.map(q => [q.name, q]));
-  const cap = [];
-  for (const s of data.stitches) {
-    for (const [me, other, idx] of [[s.a, s.b, s.ia], [s.b, s.a, s.ib]]) {
-      if (me === name && panels[other] && panels[other].label !== 'arm') for (const i of idx) if (sew[i]) cap.push(sew[i]);
-    }
-  }
-  const cx = sew.reduce((a, q) => a + q[0], 0) / sew.length;
-  const capX = cap.length ? cap.reduce((a, q) => a + q[0], 0) / cap.length : null;
-  // (x, y) -> (-y, x) puts +x on top; (y, -x) puts -x on top
-  const capOnPlusX = capX != null ? capX > cx : true;
-  return sew.map(([x, y]) => (capOnPlusX ? [-y, x] : [y, -x]));
+/** Turn a pattern outline rigidly so that the grain vector g points up (+y). */
+function grainUp(pts, [gx, gy]) {
+  // rotation taking (gx, gy) to (0, 1): x' = gy x - gx y, y' = gx x + gy y
+  if (Math.abs(gx) < 1e-9 && gy > 0) return pts.map(([x, y]) => [x, y]);
+  return pts.map(([x, y]) => [gy * x - gx * y, gx * x + gy * y]);
 }
 
-/** Build cut-ready pieces. `note` (e.g. the main body measurements) is printed on each piece. */
-export function buildPieces(data, { sa = 1.5, note = '' } = {}) {
+/**
+ * Build cut-ready pieces. `note` (e.g. the main body measurements) is printed on each piece.
+ * `grain` is the design's grain state (see grain.js). Every piece is turned rigidly so that its
+ * grain runs along local y, which the layout keeps parallel to the selvedge: sleeves (grain
+ * along the arm) come out cap up, bias pieces at 45°. The outline itself is not changed.
+ */
+export function buildPieces(data, { sa = 1.5, note = '', grain = null } = {}) {
+  const grains = pieceGrains(data, grain);
   const pieces = data.panels.map((p) => {
-    let sew = p.boundary.map(([x, y]) => [x, y]);
-    // Grain runs along local y (the garment's vertical). GarmentCode draws sleeve panels
-    // ('arm') lengthwise along local x, so turn them a quarter turn (rigidly) to put the
-    // grain along the arm, sleeve cap up. FreeSewing parts (no 3D frame) already have it.
-    const gcFrame = Array.isArray(p.rotation) && p.rotation[2] && p.rotation[2].some(v => v !== 0);
-    if (p.label === 'arm' && gcFrame) sew = turnArm(sew, p.name, data);
+    const gr = grains[p.name];
+    let sew = grainUp(p.boundary, gr.vec);
     let ranges = p.edge_ranges;
     const reversed = signedArea(sew) < 0;
     if (reversed) {   // make counter-clockwise; remap edge ranges
@@ -87,7 +81,7 @@ export function buildPieces(data, { sa = 1.5, note = '' } = {}) {
     for (const [x, y] of cut) { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); }
     const cx = (minX + maxX) / 2, h = maxY - minY;
     return {
-      id: p.name, raw: p.name, name: pieceName(p.name), cat: category(p.name),
+      id: p.name, raw: p.name, name: pieceName(p.name), cat: category(p.name), grainMode: gr.mode, grainVec: gr.vec,
       sew, cut, ranges, notches: [], seamLabels: [], reversed,
       grain: [[cx, minY + h * 0.2], [cx, maxY - h * 0.2]],
       bbox: [minX, minY, maxX, maxY], area: Math.abs(signedArea(sew)),

@@ -49,7 +49,7 @@ async function draft(id, d, m, body, { relaxed = false, complete = false, sa = 0
  */
 export async function fsPattern(id, d, m, body, { res = 1.5, drape = true } = {}) {
   const A = FS_DESIGNS[id];
-  const { pattern, fsm, warnings } = await draft(id, d, m, body, { relaxed: drape });
+  const { pattern, fsm, warnings } = await draft(id, d, m, body, { relaxed: drape, complete: true });   // complete: grainlines (same outlines)
   const o = A.options(d, { relaxed: drape });
   const out = convertDraft(pattern, A.spec(o), {
     res,

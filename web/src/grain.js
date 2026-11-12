@@ -93,9 +93,16 @@ export function panelGrain(p, mode, data) {
 }
 
 /**
+ * Ribbing bands of FreeSewing knit tops (waistband, cuffs, bindings) are cut from rib knit,
+ * which stretches mostly crosswise, whatever the main fabric. GarmentCode waistbands and
+ * cuffs are made of the garment's own fabric.
+ */
+export const isRib = (p) => (p.rib != null ? !!p.rib : !gcFrame(p) && /waistband|cuff|binding|ribbing/.test(p.name));
+
+/**
  * Grain of every panel of a pattern export ({ panels, stitches }) for the design's grain
  * state { all: mode for skirt/bodice pieces, pieces: { name: mode } }.
- * @returns {Object<string, {mode, vec: [x, y]}>}
+ * @returns {Object<string, {mode, vec: [x, y], rib: boolean}>}
  */
 export function pieceGrains(data, grain) {
   const out = {};
@@ -103,7 +110,7 @@ export function pieceGrains(data, grain) {
     // a cut-only extra layer (FreeSewing lining) follows its piece
     const base = p.name.replace(/_lining$/, '');
     const mode = grainMode(grain?.pieces?.[p.name] ? p.name : base, grain);
-    out[p.name] = { mode, vec: panelGrain(p, mode, data) };
+    out[p.name] = { mode, vec: panelGrain(p, mode, data), rib: isRib(p) };
   }
   return out;
 }
