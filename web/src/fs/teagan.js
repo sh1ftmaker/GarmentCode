@@ -70,8 +70,8 @@ export function spec(o) {
 export function placement(draft, m, body) {
   const parts = draft.parts[0];
   const F = upperFrame(body, m);
-  const T = brianTorso(F, parts['teagan.front'], parts['teagan.back'], { shoulderEdge: draft.settings[0].options.fitWaist ? 5 : 4 });
-  const sleeves = brianSleeves(F, parts['teagan.sleeve']);
+  const T = brianTorso(F, parts['teagan.front'], parts['teagan.back'], { shoulderEdge: draft.settings[0].options.fitWaist ? 5 : 4, setIn: true });
+  const sleeves = brianSleeves(F, parts['teagan.sleeve'], { atCrease: true });
   return (ps) => {
     if (ps.name === 'front') return T.front;
     if (ps.name === 'back') return T.back;

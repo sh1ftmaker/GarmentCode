@@ -83,8 +83,8 @@ export function spec(o) {
 export function placement(draft, m, body) {
   const parts = draft.parts[0];
   const F = upperFrame(body, m);
-  const T = brianTorso(F, parts['sven.front'], parts['sven.back'], { shoulderEdge: 5 });
-  const sleeves = brianSleeves(F, parts['sven.sleeve']);
+  const T = brianTorso(F, parts['sven.front'], parts['sven.back'], { shoulderEdge: 5, setIn: true });
+  const sleeves = brianSleeves(F, parts['sven.sleeve'], { atCrease: true });
   const hemY = T.front(0, -parts['sven.front'].points.cfHem.y / 10)[1];
   return (ps, loop) => {
     if (ps.name === 'front') return T.front;

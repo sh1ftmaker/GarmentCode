@@ -75,8 +75,10 @@ export function brianMeasurements(m, body, F = body ? upperFrame(body, m) : null
  * Returns { frame, front, back } where front/back are (x, y) -> [X, Y, Z]; the front's
  * local +x is the wearer's left, the back's local +x the wearer's right (both drawn as
  * seen from outside).
+ * setIn: the pieces get set-in sleeves; their armhole bottoms are placed below the armpit
+ * crease (see torsoMap's armholeX / shoulderX), so the sleeves start around the arm.
  */
-export function brianTorso(F, front, back, { gap = 1.5, shoulderEdge = null } = {}) {
+export function brianTorso(F, front, back, { gap = 1.5, shoulderEdge = null, setIn = false } = {}) {
   const sf = outlineSpan(pieceLoop(front, { fold: foldEdge(front) }));
   const sb = outlineSpan(pieceLoop(back, { fold: foldEdge(back) }));
   const half = (s, y) => { const r = s(y); return r ? Math.max(Math.abs(r[0]), Math.abs(r[1])) : 0; };
@@ -92,7 +94,7 @@ export function brianTorso(F, front, back, { gap = 1.5, shoulderEdge = null } = 
       const e = pathEdges(part.paths.seam)[shoulderEdge];
       if (e) { const a = e[0], b = e[e.length - 1]; [n, s] = a[0] < b[0] ? [a, b] : [b, a]; }
     }
-    return { hps: n, slope: Math.max(0, (n[1] - s[1]) / Math.max(1, s[0] - n[0])) };
+    return { hps: n, slope: Math.max(0, (n[1] - s[1]) / Math.max(1, s[0] - n[0])), ...(setIn ? { shoulderX: s[0], armholeX: P(part.points.armhole)[0] } : {}) };
   };
   const lf = line(front), lb = line(back);
   return {
@@ -126,13 +128,17 @@ export function treeOptions(d, keep = new Set()) {
 /** Only the measurements a design asks for. */
 export const pick = (all, keys) => Object.fromEntries(keys.map(k => [k, all[k]]));
 
-/** Sleeve maps for the left (unmirrored) and right (mirrored) copy of a Brian-family sleeve part. */
-export function brianSleeves(F, part) {
+/**
+ * Sleeve maps for the left (unmirrored) and right (mirrored) copy of a Brian-family sleeve part.
+ * atCrease: the biceps line starts at the real armpit crease (set-in sleeves sewn to a
+ * brianTorso with setIn), else at armpit height Yarm.
+ */
+export function brianSleeves(F, part, { atCrease = false } = {}) {
   const bicepsY = -part.points.bicepsLeft.y / 10;
   const out = {};
   for (const mirror of [false, true]) {
     const loop = pieceLoop(part, { mirror });
-    out[mirror] = { loop, map: sleeveMap(F, { sx: mirror ? -1 : 1, span: outlineSpan(loop), bicepsY, frontSign: mirror ? 1 : -1 }) };
+    out[mirror] = { loop, map: sleeveMap(F, { sx: mirror ? -1 : 1, span: outlineSpan(loop), bicepsY, frontSign: mirror ? 1 : -1, atCrease }) };
   }
   return out;
 }
