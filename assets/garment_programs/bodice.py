@@ -471,6 +471,14 @@ class Shirt(pyg.Component):
                 and 'pocket_in' in self.left.interfaces):
             self.stitching_rules.append((self.right.interfaces['pocket_in'],
                                          self.left.interfaces['pocket_in']))
+        elif open_front:
+            # open front: each pocket half's centre edge is caught in the front edge
+            # (the zip) together with the lower front beneath it
+            for half in (self.right, self.left):
+                if 'pocket_in' in half.interfaces and 'lower_in' in half.interfaces:
+                    half.interfaces['pocket_in'].set_right_wrong(True)
+                    self.stitching_rules.append((half.interfaces['lower_in'],
+                                                 half.interfaces['pocket_in']))
 
         # Adjust interface ordering for correct connectivity
         self.interfaces = {   # Bottom connection

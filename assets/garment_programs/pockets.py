@@ -6,16 +6,21 @@
     GarmentCode only sews panels along their edges, so a pocket can't be
     top-stitched onto the face of a panel. A kangaroo (pouch) pocket is built
     from edge seams instead: the front torso half is split at the pocket's top
-    into an upper and a lower front, and the pocket panel is sewn between them:
+    into an upper and a lower front (the full-width layer behind the pocket),
+    and the pocket is layered on top of the lower front, caught in the same
+    seams as in real construction:
 
-        * pocket top        <-> upper front, centre part of its bottom edge
-        * lower front top   <-> upper front, side part (centre part stays free:
-                                it is the inside of the pouch)
-        * pocket bottom     -- part of the garment's hem (sewn to a hem band,
-                                waistband or skirt, if any); the centre part of
-                                the lower front's hem lies loose inside the pouch
-        * pocket centre     <-> the other half's pocket centre
-        * slanted sides     -- the pocket openings (free)
+        * lower front top    <-> upper front bottom (full width)
+        * pocket top         <-> upper front bottom, centre part (layered on
+                                 top of the lower front: a 3-layer seam)
+        * lower front bottom -- the garment's hem (sewn to a hem band,
+                                waistband or skirt, if any)
+        * pocket bottom      <-> lower front bottom, centre part (basted
+                                 together and sewn into the hem as one)
+        * pocket centre      <-> the other half's pocket centre
+        * slanted sides      -- the pocket openings (free)
+    The pocket bottom and the lower front's hem run the same way round their
+    outlines, so that layered seam is stitched 'right_wrong'.
 """
 import pygarment as pyg
 
@@ -92,17 +97,25 @@ def add_kangaroo_pocket(half, body, design):
         'inside': pyg.Interface.from_multiple(
             pyg.Interface(front, fe[4]), pyg.Interface(lower, le[5])),
         'shoulder': pyg.Interface(front, fe[3]),
+        # the hem: the lower front, full width (the pocket bottom is basted onto it)
         'bottom': pyg.Interface.from_multiple(
-            pyg.Interface(pocket, pocket.interfaces['bottom'].edges, ruffle=ruffle),
+            pyg.Interface(lower, le[0], ruffle=ruffle),
             pyg.Interface(lower, le[1], ruffle=ruffle)),
         'shoulder_corner': pyg.Interface(front, [fe[2], fe[3]]),
         'collar_corner': pyg.Interface(front, [fe[3], fe[4]]),
     }
-    half.stitching_rules.append((pyg.Interface(front, fe[0]), pocket.interfaces['top']))
+    # upper/lower front: full width
+    half.stitching_rules.append((pyg.Interface(front, fe[0]), pyg.Interface(lower, le[4])))
     half.stitching_rules.append((pyg.Interface(front, fe[1]), pyg.Interface(lower, le[3])))
+    # pocket layered onto the lower front, caught in the same seams (face to face)
+    half.stitching_rules.append((pyg.Interface(front, fe[0]),
+                                 pocket.interfaces['top']))
+    half.stitching_rules.append((pyg.Interface(lower, le[0]),
+                                 pyg.Interface(pocket, pocket.interfaces['bottom'].edges, right_wrong=True)))
 
     # Interfaces above list their edges in the panel's original (canonical) order;
     # only edge directions are affected by the right/wrong side update
+    lower_in = pyg.Interface(lower, le[5])   # lower front's centre (before autonorm reorders le)
     for p in (front, lower, pocket):
         p.autonorm()
 
@@ -112,5 +125,6 @@ def add_kangaroo_pocket(half, body, design):
         'f_bottom': front.interfaces['bottom'],
         'front_in': front.interfaces['inside'],
         'pocket_in': pocket.interfaces['inside'],
+        'lower_in': lower_in,
     })
     return True
