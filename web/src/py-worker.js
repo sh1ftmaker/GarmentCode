@@ -13,7 +13,9 @@ async function init() {
   const micropip = py.pyimport('micropip');
   await micropip.install(['svgwrite', 'svgpathtools'], { deps: false });
   postMessage({ type: 'progress', text: 'Loading GarmentCode…' });
-  const zip = await (await fetch(new URL('../gc_py.zip', self.location.href))).arrayBuffer();
+  // GC_PY_VERSION is replaced with the zip's content hash by tools/build_site.sh, so a new
+  // deploy never runs against a cached older copy of the Python sources
+  const zip = await (await fetch(new URL('../gc_py.zip?v=GC_PY_VERSION', self.location.href), { cache: 'no-cache' })).arrayBuffer();
   py.FS.mkdirTree('/gc');
   py.unpackArchive(zip, 'zip', { extractDir: '/gc' });
   py.runPython(`

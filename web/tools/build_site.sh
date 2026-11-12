@@ -34,6 +34,11 @@ with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
 print('wrote', out)
 PY
 
+# Version the Python sources' URL by content, so browsers never mix a new deploy's JS
+# with a cached older gc_py.zip (GitHub Pages lets browsers cache files for 10 minutes)
+GCPY_HASH=$(sha256sum "$OUT/gc_py.zip" | cut -c1-12)
+sed -i "s/GC_PY_VERSION/$GCPY_HASH/" "$OUT/src/py-worker.js"
+
 # Body meshes + signed distance fields
 node "$ROOT/web/tools/prepare_bodies.mjs" "$ROOT" "$OUT/data"
 echo "Site built in $OUT"
