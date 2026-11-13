@@ -54,6 +54,7 @@ function opEnds(part) {   // [start, end] FreeSewing points of every drawing ope
   let cur = null, first = null;
   for (const op of part.paths.seam.ops) {
     if (op.type === 'move') { cur = first = op.to; continue; }
+    if (op.type !== 'line' && op.type !== 'curve' && op.type !== 'close') continue;
     const to = op.type === 'close' ? first : op.to;
     out.push(op.type === 'close' && near(cur, first) ? null : [cur, to]);
     cur = to;

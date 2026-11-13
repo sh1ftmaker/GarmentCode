@@ -20,6 +20,7 @@ function opEnds(part) {
   let first = null;
   for (const op of part.paths.seam.ops) {
     if (op.type === 'move') { first = op.to; continue; }
+    if (op.type !== 'line' && op.type !== 'curve' && op.type !== 'close') continue;   // e.g. noop: not an edge (pathEdges)
     ends.push(op.type === 'close' ? first : op.to);
   }
   return ends;
@@ -93,17 +94,36 @@ export function sewnFlat({ vdarts = [], hdarts = [] }) {
   };
 }
 
-/** A piece's outline (x >= 0 half, unmirrored) carried through a flat transform: outlineSpan of it. */
-export function sewnSpan(part, flat) {
+/**
+ * A piece's outline (unmirrored) carried through a flat transform: outlineSpan of it. cx: the
+ * piece's centre line (x), when not at 0; flat then takes x measured from it.
+ */
+export function sewnSpan(part, flat, cx = 0) {
   const loop = pieceLoop(part);
-  for (const e of loop.edges) e.poly = e.poly.map(([x, y]) => flat(Math.abs(x), y));
+  for (const e of loop.edges) e.poly = e.poly.map(([x, y]) => flat(Math.abs(x - cx), y));
   return outlineSpan(loop);
+}
+
+/**
+ * Pull a placed point back towards the torso when it stands more than `max` cm off the body's
+ * section at its height. torsoMap lays the top of a bodice on rings as wide as the garment at
+ * the armholes, so a close neckline (Bella's, Breanna's) starts as a funnel well in front of
+ * the neck, and the cloth falling back from it crumples into folds the drape keeps.
+ */
+function hug(F, p, max) {
+  const S = F.sec(p[1]), n = S.r.length - 1;
+  const dx = p[0] - S.xc, dz = p[2] - S.zc, rr = Math.hypot(dx, dz);
+  let f = (Math.atan2(dx, dz) / (2 * Math.PI) + 1) % 1 * n;
+  const j = Math.floor(f); f -= j;
+  const lim = S.r[j] * (1 - f) + S.r[j + 1] * f + max;
+  if (rr <= lim || rr < 1e-6) return p;
+  return [S.xc + dx * lim / rr, p[1], S.zc + dz * lim / rr];
 }
 
 /**
  * Torso maps for a darted (or panelled) front and back, each laid around the torso in its
  * sewn-flat coordinates (sewnFlat, slideFlat).
- *  front/back: { pieces: [{ part, flat }], hps, shoulder, armhole }: the pieces the side is
+ *  front/back: { pieces: [{ part, flat, cx? }], hps, shoulder, armhole }: the pieces the side is
  *    cut in (their outlines give the girth: the widest sewn half width at each height) and
  *    its high shoulder point, shoulder point and armhole bottom as [x, y] in sewn-flat
  *    coordinates (cm, y up).
@@ -113,14 +133,20 @@ export function sewnSpan(part, flat) {
 export function dartedTorso(F, front, back, { gap = 1.5 } = {}) {
   const side = (s, y) => { const r = s(clamp(y, s.y0, s.y1)); return r ? r[1] : 0; };
   const half = (S) => (y) => Math.max(...S.map(s => side(s, y)));
-  const hf = half(front.pieces.map(p => sewnSpan(p.part, p.flat))), hb = half(back.pieces.map(p => sewnSpan(p.part, p.flat)));
+  const hf = half(front.pieces.map(p => sewnSpan(p.part, p.flat, p.cx))), hb = half(back.pieces.map(p => sewnSpan(p.part, p.flat, p.cx)));
   const girth = (y) => hf(y) + hb(y);
   const armholeY = Math.min(front.armhole[1], back.armhole[1]);
   const line = ({ hps: n, shoulder: s, armhole: a }) => ({ hps: n, slope: Math.max(0, (n[1] - s[1]) / Math.max(1, s[0] - n[0])), shoulderX: s[0], armholeX: a[0] });
   const Tf = torsoMap(F, { side: 1, xSign: 1, ...line(front), girth, armholeY, gap });
   const Tb = torsoMap(F, { side: -1, xSign: -1, ...line(back), girth, armholeY, gap });
-  const wrap = (T) => (flat) => (x, y) => { const [u, v] = flat(Math.abs(x), y); return T(Math.sign(x || 1) * u, v); };
-  return { front: wrap(Tf), back: wrap(Tb), girth, armholeY };
+  // inside the high shoulder points (the neckline and below it), the cloth starts no higher
+  // than the high shoulder point less (most of) its depth below it in the pattern
+  const wrap = (T, n) => (flat) => (x, y) => {
+    const [u, v] = flat(Math.abs(x), y), p = hug(F, T(Math.sign(x || 1) * u, v), gap + 2.5);
+    if (u < n[0]) p[1] = Math.min(p[1], F.Yhps + gap - 0.8 * Math.max(0, n[1] - v));
+    return p;
+  };
+  return { front: wrap(Tf, front.hps), back: wrap(Tb, back.hps), girth, armholeY };
 }
 
 /**
