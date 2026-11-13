@@ -31,9 +31,11 @@ import * as hugo from './hugo.js';
 import * as teagan from './teagan.js';
 import * as sven from './sven.js';
 import * as aaron from './aaron.js';
+import * as titan from './titan.js';
+import * as charlie from './charlie.js';
 
 /** Designs with a 3D adapter (seams + placement). */
-export const ADAPTERS = { bruce, hugo, teagan, sven, aaron };
+export const ADAPTERS = { bruce, hugo, teagan, sven, aaron, titan, charlie };
 // Drafted but without any usable outline in the browser (Gozer draws its ghost only as text)
 const UNSUPPORTED = new Set(['gozer']);
 const CATALOG = Object.fromEntries(FS_CATALOG.filter(d => !UNSUPPORTED.has(d.id)).map(d => [d.id, d]));
@@ -153,13 +155,14 @@ export async function fsPattern(id, d, m, body, { res = 1.5, drape = true, mater
     out.noDrape = true;
   } else {
     const o = A.options(d, { relaxed: drape });
-    out = convertDraft(pattern, A.spec(o), {
+    out = convertDraft(pattern, A.spec(o, pattern), {   // spec may look up edges by point name
       res,
       place: drape ? A.placement(pattern, m, body) : null,
       attachLevels: A.attachLevels(pattern, m),
       layers: !drape,
     });
     if (A.lift != null) out.lift = A.lift;   // how far above its placement the drape starts (garment.js)
+    if (A.others) out.others = A.others;   // pieces cut from other materials (listed, not laid out)
   }
   out.warnings = warnings;
   out.fs = { design: A.name, measurements: fsm, options: A.options(d) };
