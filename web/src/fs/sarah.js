@@ -84,7 +84,10 @@ export function spec(o, draft) {
   const L = { front: fFold ? 'front' : 'front_l', back: bFold ? 'back' : 'back_l', f: fFold ? m : id, b: bFold ? m : id };
   const seams = [], waist = [];
   for (const S of [R, L]) {
-    seams.push({ a: chain(S.front, S.f(fSide)), b: chain(S.back, S.b(bSide), true) });   // side seam, waist down
+    // side seam, waist down: front and back are drawn alike (two curves to the seat, then a
+    // line), so each piece is sewn to its counterpart (one chain would merge near breaks)
+    if (fSide.length === bSide.length) fSide.forEach((f, k) => seams.push({ a: chain(S.front, S.f([f])), b: chain(S.back, S.b([bSide[bSide.length - 1 - k]]), true) }));
+    else seams.push({ a: chain(S.front, S.f(fSide)), b: chain(S.back, S.b(bSide), true) });
     for (const [a, b] of fW.darts) seams.push({ a: chain(S.front, S.f([a])), b: chain(S.front, S.f([b]), true) });
     for (const [a, b] of bW.darts) seams.push({ a: chain(S.back, S.b([a])), b: chain(S.back, S.b([b]), true) });
     waist.push(...chain(S.front, S.f(fW.waist)), ...chain(S.back, S.b(bW.waist)));
