@@ -140,7 +140,8 @@ export function spec(o, draft) {
   const side = (s, rev) => (rev ? E.sWaistItems('side' + s).reverse().map(([p, op, , a, b]) => [p, op, true, a, b]) : E.sWaistItems('side' + s));
   seams.push(
     { a: chain('front_r', E.fCrotch), b: chain('front_l', E.fCrotch) },   // centre front (the fly drawn closed)
-    { a: [...chain('yoke_r', E.yCross), ...chain('back_r', E.bCross)], b: [...chain('yoke_l', E.yCross), ...chain('back_l', E.bCross)] },
+    { a: chain('yoke_r', E.yCross), b: chain('yoke_l', E.yCross) },     // centre back: the yokes
+    { a: chain('back_r', E.bCross), b: chain('back_l', E.bCross) },     // and the backs
     // waistbands: the right one from the centre front (past its button extension) to the side,
     // the back one round the back, the left one from the side to the centre front
     { a: [...chain('front_r', E.fWaist), ...side('_r', false)], b: [['waistband_right', 1, false, E.fly, 1]] },
