@@ -57,9 +57,6 @@ import * as waralee from './waralee.js';
 // diana.js drapes cleanly, but its cowl settles as a high funnel neck instead of the
 // design's draped neckline, so Diana stays pattern-only until that looks right.
 void diana;
-
-
-/** Designs with a 3D adapter (seams + placement). */
 // tina.js drafts and sews, but its two front layers slip through each other near the side
 // seams where they are welded together (see tina.js), so Tina stays pattern-only too.
 void tina;
