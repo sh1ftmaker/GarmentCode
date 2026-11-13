@@ -31,9 +31,12 @@ import * as hugo from './hugo.js';
 import * as teagan from './teagan.js';
 import * as sven from './sven.js';
 import * as aaron from './aaron.js';
+import * as simon from './simon.js';
+import * as shelly from './shelly.js';
+import * as diana from './diana.js';
 
 /** Designs with a 3D adapter (seams + placement). */
-export const ADAPTERS = { bruce, hugo, teagan, sven, aaron };
+export const ADAPTERS = { bruce, hugo, teagan, sven, aaron, simon, shelly, diana };
 // Drafted but without any usable outline in the browser (Gozer draws its ghost only as text)
 const UNSUPPORTED = new Set(['gozer']);
 const CATALOG = Object.fromEntries(FS_CATALOG.filter(d => !UNSUPPORTED.has(d.id)).map(d => [d.id, d]));
