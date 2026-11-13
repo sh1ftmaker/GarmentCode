@@ -32,7 +32,8 @@ export function edgeEndingAt(part, pt) {
  *    -> frontPitchPoint, -> tsLeftEdge), front seam (-> tsElbowLeft -> tsWristLeft), wrist;
  *  under: back seam (wrist -> elbowRight -> usRightEdge -> usTip), cap (-> usLeftEdgeRight
  *    -> usLeftEdge), front seam (-> usElbowLeft -> usWristLeft), wrist.
- * Edges between two named points (e.g. a vent) are included in the run they belong to.
+ * Edges between two named points are included in the run they belong to (a vent's
+ * extension below ventSlopeStart is not: see finishSleeve).
  */
 export function sleeveEdges(ts, us) {
   const run = (part, from, names) => {
@@ -48,10 +49,12 @@ export function sleeveEdges(ts, us) {
     }
     return out;
   };
-  // top sleeve: from its first edge
-  const [tb1, tb2, tb3, tc1, tc2, tc3, tf1, tf2] = run(ts, 0,
+  // the back seam starts at the wrist, or above a vent (Jaeger: the vent's extension runs
+  // from the wrist to ventSlopeStart and is left unsewn)
+  const startOf = (part) => { const j = edgeEndingAt(part, part.points.ventSlopeStart); return j < 0 ? 0 : j + 1; };
+  const [tb1, tb2, tb3, tc1, tc2, tc3, tf1, tf2] = run(ts, startOf(ts),
     ['elbowRight', 'tsRightEdge', 'backPitchPoint', 'top', 'frontPitchPoint', 'tsLeftEdge', 'tsElbowLeft', 'tsWristLeft']);
-  const [ub1, ub2, ub3, uc1, uc2, uf1, uf2] = run(us, 0,
+  const [ub1, ub2, ub3, uc1, uc2, uf1, uf2] = run(us, startOf(us),
     ['elbowRight', 'usRightEdge', 'usTip', 'usLeftEdgeRight', 'usLeftEdge', 'usElbowLeft', 'usWristLeft']);
   return {
     top: { back: [...tb1, ...tb2, ...tb3], capBack: tc1, capTop: tc2, capFront: tc3, front: [...tf1, ...tf2] },
@@ -129,4 +132,23 @@ export function sleeveMaps(F, ts, us, E, { gap = 1.2 } = {}) {
     };
   }
   return (kind, mirror) => maps[kind + !!mirror];
+}
+
+const near = (a, b) => a && b && Math.abs(a.x - b.x) < 0.01 && Math.abs(a.y - b.y) < 0.01;
+/**
+ * The drape copy of a two-part sleeve piece with a vent and a hem allowance (Jaeger, Carlton):
+ * as the finished sleeve shows it from outside, which is the library sleeve's outline. The
+ * back seam runs straight on to the wrist (the vent's extension is folded in behind it) and
+ * the outline ends at the hem line (the allowance is turned up inside); those layers are cut,
+ * not simulated. kind: 'ts' (top sleeve) or 'us' (under sleeve). Mutates the part's seam path:
+ * for the drape copy only.
+ */
+export function finishSleeve(part, kind) {
+  const p = part.points, wr = p[kind + 'WristRight'], wl = p[kind + 'WristLeft'];
+  if (!wr || !wl || !p.elbowRight) return;
+  const ops = part.paths.seam.ops;
+  const a = ops.findIndex(op => near(op.to, p.elbowRight));
+  const b = ops.findIndex((op, i) => i > a && near(op.to, wl));
+  if (a < 0 || b < 0) return;
+  part.paths.seam.ops = [{ type: 'move', to: wr }, { type: 'line', to: p.elbowRight }, ...ops.slice(a + 1, b + 1), { type: 'line', to: wr }];
 }
