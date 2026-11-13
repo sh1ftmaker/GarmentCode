@@ -76,8 +76,6 @@ import * as otis from './otis.js';
 // front edge rides up taut round the front of the neck.)
 void diana;
 
-
-/** Designs with a 3D adapter (seams + placement). */
 // tina.js drafts and sews, but its two front layers slip through each other near the side
 // seams where they are welded together (see tina.js), so Tina stays pattern-only too.
 void tina;
