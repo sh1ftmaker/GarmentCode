@@ -42,12 +42,17 @@ import * as brian from './brian.js';
 import * as huey from './huey.js';
 import * as yuri from './yuri.js';
 import * as wahid from './wahid.js';
+import * as sarah from './sarah.js';
+import * as sandy from './sandy.js';
+import * as walburga from './walburga.js';
+import * as sunny from './sunny.js';
+import * as waralee from './waralee.js';
 
 /** Designs with a 3D adapter (seams + placement). */
 // diana.js drapes cleanly, but its cowl settles as a high funnel neck instead of the
 // design's draped neckline, so Diana stays pattern-only until that looks right.
 void diana;
-export const ADAPTERS = { bruce, hugo, teagan, sven, aaron, simon, shelly, titan, charlie, penelope, uma, brian, huey, yuri, wahid };
+export const ADAPTERS = { bruce, hugo, teagan, sven, aaron, simon, shelly, titan, charlie, penelope, uma, brian, huey, yuri, wahid, sarah, sandy, walburga, sunny, waralee };
 // Drafted but without any usable outline in the browser (Gozer draws its ghost only as text)
 const UNSUPPORTED = new Set(['gozer']);
 const CATALOG = Object.fromEntries(FS_CATALOG.filter(d => !UNSUPPORTED.has(d.id)).map(d => [d.id, d]));
