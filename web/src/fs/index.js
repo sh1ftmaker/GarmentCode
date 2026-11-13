@@ -11,7 +11,7 @@
 // Adding a 3D adapter for a design:
 //  1. Write src/fs/<design>.js like bruce.js: id/name/icon, `design` (options as
 //     { v, range, type, name, help }), options(), measurements() (GarmentCode cm ->
-//     FreeSewing mm; fsMeasurements() in measure.js has them all), spec() (pieces:
+//     FreeSewing mm; fsMeasurements() in measure.js has them all), spec(options, draft) (pieces:
 //     fold/mirror copies; seams: chains of edges by seam-path operation number; labels:
 //     waist edges -> 'lower_interface'), placement() ((x, y) on the piece -> 3D;
 //     hipSurface() in convert.js covers lower-body pieces, place.js the torso, arms, head
@@ -31,9 +31,13 @@ import * as hugo from './hugo.js';
 import * as teagan from './teagan.js';
 import * as sven from './sven.js';
 import * as aaron from './aaron.js';
+import * as brian from './brian.js';
+import * as huey from './huey.js';
+import * as yuri from './yuri.js';
+import * as wahid from './wahid.js';
 
 /** Designs with a 3D adapter (seams + placement). */
-export const ADAPTERS = { bruce, hugo, teagan, sven, aaron };
+export const ADAPTERS = { bruce, hugo, teagan, sven, aaron, brian, huey, yuri, wahid };
 // Drafted but without any usable outline in the browser (Gozer draws its ghost only as text)
 const UNSUPPORTED = new Set(['gozer']);
 const CATALOG = Object.fromEntries(FS_CATALOG.filter(d => !UNSUPPORTED.has(d.id)).map(d => [d.id, d]));
@@ -153,7 +157,7 @@ export async function fsPattern(id, d, m, body, { res = 1.5, drape = true, mater
     out.noDrape = true;
   } else {
     const o = A.options(d, { relaxed: drape });
-    out = convertDraft(pattern, A.spec(o), {
+    out = convertDraft(pattern, A.spec(o, pattern), {
       res,
       place: drape ? A.placement(pattern, m, body) : null,
       attachLevels: A.attachLevels(pattern, m),
