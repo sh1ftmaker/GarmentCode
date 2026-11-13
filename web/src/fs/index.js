@@ -42,12 +42,18 @@ import * as brian from './brian.js';
 import * as huey from './huey.js';
 import * as yuri from './yuri.js';
 import * as wahid from './wahid.js';
+import * as onyx from './onyx.js';
+import * as opal from './opal.js';
+import * as otis from './otis.js';
 
 /** Designs with a 3D adapter (seams + placement). */
 // diana.js drapes cleanly, but its cowl settles as a high funnel neck instead of the
-// design's draped neckline, so Diana stays pattern-only until that looks right.
+// design's draped neckline, so Diana stays pattern-only until that looks right. (Tried: soft
+// fabrics, folded-over and deep-U starts, collar constraints; in every case the neckline
+// edges end up stretched ~20%, the shoulder seams slide out to the shoulder tips and the
+// front edge rides up taut round the front of the neck.)
 void diana;
-export const ADAPTERS = { bruce, hugo, teagan, sven, aaron, simon, shelly, titan, charlie, penelope, uma, brian, huey, yuri, wahid };
+export const ADAPTERS = { bruce, hugo, teagan, sven, aaron, simon, shelly, titan, charlie, penelope, uma, brian, huey, yuri, wahid, onyx, opal, otis };
 // Drafted but without any usable outline in the browser (Gozer draws its ghost only as text)
 const UNSUPPORTED = new Set(['gozer']);
 const CATALOG = Object.fromEntries(FS_CATALOG.filter(d => !UNSUPPORTED.has(d.id)).map(d => [d.id, d]));
