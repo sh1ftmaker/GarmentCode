@@ -11,7 +11,7 @@
 // Adding a 3D adapter for a design:
 //  1. Write src/fs/<design>.js like bruce.js: id/name/icon, `design` (options as
 //     { v, range, type, name, help }), options(), measurements() (GarmentCode cm ->
-//     FreeSewing mm; fsMeasurements() in measure.js has them all), spec() (pieces:
+//     FreeSewing mm; fsMeasurements() in measure.js has them all), spec(options, draft) (pieces:
 //     fold/mirror copies; seams: chains of edges by seam-path operation number; labels:
 //     waist edges -> 'lower_interface'), placement() ((x, y) on the piece -> 3D;
 //     hipSurface() in convert.js covers lower-body pieces, place.js the torso, arms, head
@@ -38,12 +38,16 @@ import * as titan from './titan.js';
 import * as charlie from './charlie.js';
 import * as penelope from './penelope.js';
 import * as uma from './uma.js';
+import * as brian from './brian.js';
+import * as huey from './huey.js';
+import * as yuri from './yuri.js';
+import * as wahid from './wahid.js';
 
 /** Designs with a 3D adapter (seams + placement). */
 // diana.js drapes cleanly, but its cowl settles as a high funnel neck instead of the
 // design's draped neckline, so Diana stays pattern-only until that looks right.
 void diana;
-export const ADAPTERS = { bruce, hugo, teagan, sven, aaron, simon, shelly, titan, charlie, penelope, uma };
+export const ADAPTERS = { bruce, hugo, teagan, sven, aaron, simon, shelly, titan, charlie, penelope, uma, brian, huey, yuri, wahid };
 // Drafted but without any usable outline in the browser (Gozer draws its ghost only as text)
 const UNSUPPORTED = new Set(['gozer']);
 const CATALOG = Object.fromEntries(FS_CATALOG.filter(d => !UNSUPPORTED.has(d.id)).map(d => [d.id, d]));
