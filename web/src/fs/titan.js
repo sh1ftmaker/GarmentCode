@@ -1,5 +1,5 @@
-// FreeSewing "Titan" trouser block (https://freesewing.eu/designs/titan/, MIT, design by
-// Joost De Cock): a front and a back per leg, fitted to the seat, the knee and the crotch
+// FreeSewing "Titan" trouser block (https://freesewing.eu/designs/titan/, MIT, design by Debra
+// Bean and Joost De Cock): a front and a back per leg, fitted to the seat, the knee and the crotch
 // seam. Measurements from the mannequin, options as sliders, seam table and placement
 // around the hips and legs for the drape (lower.js).
 import { fsMeasurements, pick } from './measure.js';
@@ -10,7 +10,7 @@ export const name = 'Titan trouser block';
 export const short = 'Trouser block';
 export const exportName = 'Titan';
 export const url = 'https://freesewing.eu/designs/titan/';
-export const author = 'Joost De Cock';
+export const author = 'Debra Bean, Joost De Cock';
 export const icon = 'M14 6h28l4 46h-11l-7-34-7 34H10z';
 
 export const design = {

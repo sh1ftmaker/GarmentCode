@@ -1,4 +1,4 @@
-// FreeSewing "Uma" underwear (https://freesewing.eu/designs/uma/, MIT, design by Joost De
+// FreeSewing "Uma" undies (https://freesewing.eu/designs/uma/, MIT, design by Joost De
 // Cock): a front, a back and a (double) gusset, drafted with negative ease for stretch
 // knits. Measurements from the mannequin, options as sliders, seam table and placement
 // around the hips and under the crotch for the drape.
@@ -6,7 +6,7 @@ import { fsMeasurements, pick } from './measure.js';
 import { fsOptions, skirtSections } from './lower.js';
 
 export const id = 'uma';
-export const name = 'Uma underwear';
+export const name = 'Uma undies';
 export const short = 'Underwear';
 export const exportName = 'Uma';
 export const url = 'https://freesewing.eu/designs/uma/';

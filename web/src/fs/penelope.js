@@ -1,5 +1,5 @@
 // FreeSewing "Penelope" pencil skirt (https://freesewing.eu/designs/penelope/, MIT, design
-// by Wouter van Wageningen): a front cut on the fold, two backs with a centre back zip and
+// by Wouter Van Wageningen): a front cut on the fold, two backs with a centre back zip and
 // vent, waist darts and an optional straight waistband. Measurements from the mannequin,
 // options as sliders, seam table and placement around the hips and legs (lower.js).
 import { fsMeasurements, pick } from './measure.js';
@@ -11,7 +11,7 @@ export const name = 'Penelope pencil skirt';
 export const short = 'Pencil skirt';
 export const exportName = 'Penelope';
 export const url = 'https://freesewing.eu/designs/penelope/';
-export const author = 'Wouter van Wageningen';
+export const author = 'Wouter Van Wageningen';
 export const settings = { expand: true };   // draft the waistband too
 export const icon = 'M16 6h24v6l4 38c-5 2-27 2-32 0l4-38zM16 12h24';
 export const stretchNote = 'The waistband is draped folded in half lengthwise. The zip is drawn closed; the back vent hangs open.';
