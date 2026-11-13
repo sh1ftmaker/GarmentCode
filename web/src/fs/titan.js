@@ -3,7 +3,7 @@
 // seam. Measurements from the mannequin, options as sliders, seam table and placement
 // around the hips and legs for the drape (lower.js).
 import { fsMeasurements, pick } from './measure.js';
-import { opsBetween, chain, lowerSections, trouserMaps, fsOptions } from './lower.js';
+import { opsBetween, chain, lowerSections, trouserMaps, fsOptions, partOutline } from './lower.js';
 
 export const id = 'titan';
 export const name = 'Titan trouser block';
@@ -92,24 +92,7 @@ export function legPlacement(draft, m, body, fp, bp, { csF = 'crotchSeamCurveSta
   const W = waistY(m);
   const sections = lowerSections(body, W + 8);
   const loc = (p) => [p.x / 10, -p.y / 10];
-  const outline = (part) => {   // dense outline for the scanline extents
-    const pts = [];
-    let cur = null;
-    for (const op of part.paths.seam.ops) {
-      if (op.type === 'move') { cur = op.to; pts.push(loc(cur)); continue; }
-      if (op.type === 'curve') {
-        for (let i = 1; i <= 24; i++) {
-          const t = i / 24, s = 1 - t;
-          const x = s * s * s * cur.x + 3 * s * s * t * op.cp1.x + 3 * s * t * t * op.cp2.x + t * t * t * op.to.x;
-          const y = s * s * s * cur.y + 3 * s * s * t * op.cp1.y + 3 * s * t * t * op.cp2.y + t * t * t * op.to.y;
-          pts.push([x / 10, -y / 10]);
-        }
-      } else if (op.to) pts.push(loc(op.to));
-      if (op.to) cur = op.to;
-    }
-    pts.push(pts[0]);
-    return { edges: [{ poly: pts }] };
-  };
+  const outline = partOutline;
   const T = trouserMaps(sections, {
     waistY: W, gap,
     front: { loop: outline(fp), outSign: -1, cs: loc(fp.points[csF]), forkY: loc(fp.points.fork)[1] },

@@ -54,6 +54,26 @@ export function opsBetween(part, from, to, path = 'seam') {
 /** A seam chain item list ([[piece, op, rev]...]) for ops, optionally run backwards. */
 export const chain = (piece, ids, rev = false) => (rev ? [...ids].reverse().map(i => [piece, i, true]) : ids.map(i => [piece, i]));
 
+/** A part's seam outline (local cm, y up) as a one-edge loop, for outlineSpan(). */
+export function partOutline(part) {
+  const loc = (p) => [p.x / 10, -p.y / 10], pts = [];
+  let cur = null;
+  for (const op of part.paths.seam.ops) {
+    if (op.type === 'move') { cur = op.to; pts.push(loc(cur)); continue; }
+    if (op.type === 'curve') {
+      for (let i = 1; i <= 24; i++) {
+        const t = i / 24, s = 1 - t;
+        const x = s * s * s * cur.x + 3 * s * s * t * op.cp1.x + 3 * s * t * t * op.cp2.x + t * t * t * op.to.x;
+        const y = s * s * s * cur.y + 3 * s * s * t * op.cp1.y + 3 * s * t * t * op.cp2.y + t * t * t * op.to.y;
+        pts.push([x / 10, -y / 10]);
+      }
+    } else if (op.to) pts.push(loc(op.to));
+    if (op.to) cur = op.to;
+  }
+  pts.push(pts[0]);
+  return { edges: [{ poly: pts }] };
+}
+
 // ------------------------------------------------------------------ body sections
 function hullCW(pts) {   // convex hull, clockwise in (x, z) (outer side -> front -> centre for x < 0)
   pts = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
@@ -70,7 +90,11 @@ function loopOf(H) {
   // start at the outermost point (min x)
   let i0 = 0;
   for (let i = 1; i < H.length; i++) if (H[i][0] < H[i0][0]) i0 = i;
-  const P = H.slice(i0).concat(H.slice(0, i0));
+  return loopFrom(H.slice(i0).concat(H.slice(0, i0)));
+}
+/** loopOf() for a polygon already starting where arc 0 should be. */
+function loopFrom(H) {
+  const P = H.slice();
   P.push(P[0]);
   const cum = [0];
   for (let i = 1; i < P.length; i++) cum.push(cum[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
@@ -207,5 +231,82 @@ export function waistBandMap(body, sections, { Y, len, gap = 1.5 }) {
     const s = S.sCF - 2 * f * half;
     const [x, z, nx, nz] = S.at(s);
     return [sx * (x + gap * nx), Y + v, z + gap * nz];
+  };
+}
+
+// ------------------------------------------------------------------ skirts
+/**
+ * A waistline with darts, from point `from` to `to` along the seam: { waist: [op...] (the
+ * waist segments in drawing order), darts: [[leg1, leg2]...] } where a dart is a pair of
+ * ops running down to its tip and back up.
+ */
+export function waistDarts(part, from, to, depth = 1.5) {
+  const ids = opsBetween(part, from, to);
+  const ops = part.paths.seam.ops, ends = [];   // per op number: [start y, end y] (cm, FreeSewing's y down)
+  let cur = null;
+  for (const op of ops) {
+    if (op.type === 'move') { cur = op.to; continue; }
+    const to = op.to || cur;
+    ends.push([cur.y / 10, to.y / 10]);
+    cur = to;
+  }
+  const waist = [], darts = [];
+  for (let k = 0; k < ids.length; k++) {
+    const i = ids[k], j = ids[k + 1];
+    if (j !== undefined && ends[i][1] - ends[i][0] > depth && ends[i][1] - ends[j][1] > depth) { darts.push([i, j]); k++; continue; }
+    waist.push(i);
+  }
+  return { waist, darts };
+}
+
+/**
+ * Sections of the whole lower body (torso and both legs as one convex outline, as a
+ * skirt hangs over them), one per cm: section(Y) -> loop with arc 0 at the centre front,
+ * increasing towards the wearer's left (+x).
+ */
+export function skirtSections(body, topY) {
+  const { pos, part } = body;
+  const n = Math.ceil(topY) + 2, bins = Array.from({ length: n }, () => []);
+  for (let v = 0; v < part.length; v++) {
+    const p = part[v];
+    if (p !== PART.BODY && p !== PART.L_LEG && p !== PART.R_LEG) continue;
+    const x = pos[3 * v], y = pos[3 * v + 1], z = pos[3 * v + 2];
+    if (y < 0 || y > topY + 1.5) continue;
+    for (let k = Math.max(0, Math.floor(y - 1.2)); k <= Math.min(n - 1, Math.ceil(y + 1.2)); k++) if (Math.abs(y - k) <= 1.2) bins[k].push([x, z], [-x, z]);
+  }
+  const loops = new Array(n).fill(null);
+  for (let k = 0; k < n; k++) {
+    const H = bins[k].length >= 16 ? hullCW(bins[k]) : null;
+    if (!H || H.length < 3) continue;
+    // start at the centre front: where the outline crosses x = 0 at the front
+    let i0 = -1, zb = -Infinity;
+    for (let i = 0; i < H.length; i++) {
+      const a = H[i], b = H[(i + 1) % H.length];
+      if (a[0] <= 0 && b[0] > 0 && Math.max(a[1], b[1]) > zb) { zb = Math.max(a[1], b[1]); i0 = i; }
+    }
+    if (i0 < 0) continue;
+    const a = H[i0], b = H[(i0 + 1) % H.length], t = -a[0] / (b[0] - a[0]);
+    const R = [[0, a[1] + (b[1] - a[1]) * t], ...H.slice(i0 + 1), ...H.slice(0, i0 + 1)];
+    loops[k] = loopFrom(R);
+  }
+  for (let k = 0; k < n; k++) if (!loops[k]) {
+    for (let d = 1; d < n; d++) { if (loops[k - d]) { loops[k] = loops[k - d]; break; } if (loops[k + d]) { loops[k] = loops[k + d]; break; } }
+  }
+  return (Y) => loops[clamp(Math.round(Y), 0, n - 1)];
+}
+
+/**
+ * Skirt pieces around the lower body: (u, y, off) -> 3D, u = cm along the skirt's girth
+ * from the centre front (towards the wearer's left), y = local height (0 = waistY in the
+ * world), off = extra clearance (cm) for layered bits (a vent's overlap).
+ * girth(y): the skirt's whole girth at local height y; the section is scaled up to it.
+ */
+export function skirtMap(sections, { waistY, girth, gap = 1.5 }) {
+  return (u, y, off = 0) => {
+    const Y = waistY + y, S = sections(Y), W = girth(y);
+    const k = Math.max(1, W / S.L);
+    const [x, z, nx, nz] = S.at((u / W) * S.L);
+    const g = gap + off;
+    return [S.cx + k * (x - S.cx) + g * nx, Y, S.cz + k * (z - S.cz) + g * nz];
   };
 }
