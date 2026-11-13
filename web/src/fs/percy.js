@@ -66,7 +66,7 @@ export function edges(draft) {
   const parts = draft.parts[0], fp = parts['percy.front'], bp = parts['percy.back'], sp = parts['percy.pocket'];
   const F = fp.points, B = bp.points, S = sp.points;
   return {
-    fWaist: opsUntil(fp, F.styleWaistIn, F.pocketInnerEdge, F.pocketFacingEdge), fOut: opsBetween(fp, F.pocketBottomEdge, F.outseamShiftUpwards),
+    fWaist: opsUntil(fp, F.styleWaistIn, F.pocketBottomEdge, F.pocketFacingEdge), fOut: opsBetween(fp, F.pocketBottomEdge, F.outseamShiftUpwards),
     fHem: opsBetween(fp, F.outseamShiftUpwards, F.inseamShiftUpwards), fIn: opsBetween(fp, F.inseamShiftUpwards, F.fork),
     fCrotch: opsBetween(fp, F.fork, F.styleWaistIn),
     bIn: opsBetween(bp, B.fork, B.inseamShiftUpwards), bHem: opsBetween(bp, B.inseamShiftUpwards, B.outseamShiftUpwards),
@@ -122,7 +122,7 @@ export function spec(o, draft) {
     const f = 'front' + s, b = 'back' + s, sd = 'side' + s, c = 'cuff' + s;
     seams.push(
       // outseam, waist down: the side piece above the pocket opening, the front below it
-      { a: [...part(sd, E.sOut), ...chain(f, E.fOut)], b: chain(b, E.bOut, true) },
+      ...gatherSeams([...part(sd, E.sOut), ...chain(f, E.fOut)], chain(b, E.bOut, true), len),
       { a: chain(f, E.fIn), b: chain(b, E.bIn, true) },          // inseam
       // cuff, gathered on from the inseam round the back and the front
       ...gatherSeams([...chain(b, E.bHem), ...chain(f, E.fHem)], [[c, 3]], len),
@@ -159,8 +159,11 @@ export function spec(o, draft) {
       { name: 'waist_side_r2', part: 'percy.waist_side', cutOnly: true },
       { name: 'waist_side_l2', part: 'percy.waist_side', mirror: true, cutOnly: true },
       { name: 'waist_back2', part: 'percy.waist_back', cutOnly: true },
-      { name: 'facing_r', part: 'percy.pocket_facing', cutOnly: true },
-      { name: 'facing_l', part: 'percy.pocket_facing', mirror: true, cutOnly: true },
+      // (FreeSewing leaves the pocket facings out of some drafts)
+      ...(draft.parts[0]['percy.pocket_facing']?.paths.seam ? [
+        { name: 'facing_r', part: 'percy.pocket_facing', cutOnly: true },
+        { name: 'facing_l', part: 'percy.pocket_facing', mirror: true, cutOnly: true },
+      ] : []),
     ],
     seams,
     // the waistband's top edge sits at the waist
@@ -177,7 +180,8 @@ function garmentTop(draft, m) {
 
 /**
  * The slashed and spread front / back are fans hinged along the waist, the hem spread out
- * round a centre far above it (and FreeSewing turns the whole piece round). For the
+ * round a centre far above it (and FreeSewing turns the whole piece round; unspread pieces
+ * stay in Titan's frame, as drawn). For the
  * placement a piece is unrolled about that centre into an upright frame: y = yRef minus the
  * distance below the waist arc, x = the arc position, partly closing the spread (mu = 0:
  * closed up to the waist's width at every height, 1: as cut). Returns (x, y) -> [x', y'].
@@ -194,10 +198,7 @@ export function fanFrame(hem, waist, yRef, mu = 0.45) {
   const cx = sol[0] / 2, cy = sol[1] / 2, R = Math.sqrt(Math.max(0, sol[2] + cx * cx + cy * cy));
   const yMean = hem.reduce((s, p) => s + p[1], 0) / n;
   // an unspread (straight) hem, or a centre below it: leave the piece as drawn
-  if (!isFinite(R) || R > 300 || cy < yMean) {
-    const yw = waist.reduce((s, p) => s + p[1], 0) / waist.length;
-    return (x, y) => [x, y - yw + yRef];
-  }
+  if (!isFinite(R) || R > 300 || cy < yMean || !waist.length) return (x, y) => [x, y];
   const Rw = waist.reduce((s, [x, y]) => s + Math.hypot(x - cx, y - cy), 0) / waist.length;
   return (x, y) => {
     const h = Math.hypot(x - cx, y - cy) - Rw, th = Math.atan2(x - cx, cy - y);
@@ -223,7 +224,7 @@ export function placement(draft, m, body) {
     waistY: W, gap: 1.8, underGap: 0.4,
     front: { loop: tl(tf, partOutline(fp)), outSign: -1, cs: pt(tf, F.crotchSeamCurveStart), forkY: pt(tf, F.fork)[1] },
     back: { loop: tl(tb, partOutline(bp)), outSign: 1, cs: pt(tb, B.crossSeamCurveStart), forkY: pt(tb, B.fork)[1] },
-    side: tl(tf, partOutline(sp)),
+    side: tl(tf, partOutline(sp)), openBottom: pt(tf, F.pocketBottomEdge)[1],
   });
   const via = (f, t) => (x, y) => { const q = t(x, y); return f(q[0], q[1]); };
   const front = via(T.front, tf), back = via(T.back, tb), side = via(T.side, tf);

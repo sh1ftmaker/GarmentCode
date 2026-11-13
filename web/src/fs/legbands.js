@@ -62,12 +62,14 @@ export function ringBand(ring, len, { dir = -1, out = 0.3 } = {}) {
  *  front / back: { loop, outSign, cs, forkY } as for trouserMaps; side: optional loop of a
  *    side panel drafted in the front's coordinates (the pocket's side piece that shows
  *    through the pocket opening), counted into the front's width where it reaches past it;
+ *  openBottom: local height of the bottom of the pocket opening (the side panel is all
+ *    under the front below it);
  *  gap: clearance off the body; underGap: the side panel's clearance where it lies under
  *    the front (a layer inside it).
  * Returns { front, back, side }: (x, y) -> [X, Y, Z] for the wearer's right leg pieces as
  * drawn (mirror the result in x for the left leg).
  */
-export function fullTrouserMaps(sections, { waistY, front, back, side = null, gap = 1.5, underGap = 0.5, blend = 5 }) {
+export function fullTrouserMaps(sections, { waistY, front, back, side = null, openBottom = -Infinity, gap = 1.5, underGap = 0.5, blend = 5 }) {
   const spans = { front: outlineSpan(front.loop), back: outlineSpan(back.loop) };
   const sideSpan = side ? outlineSpan(side) : null;
   const P = { front, back };
@@ -120,7 +122,8 @@ export function fullTrouserMaps(sections, { waistY, front, back, side = null, ga
   // the side panel: on the front's map, tucked under the front where the front covers it
   const S = side ? (x, y) => {
     const sp = spans.front(y);
-    const depth = sp ? Math.min(x - sp[0], sp[1] - x) : -1;
+    // under the front: inside its outline, and all of it below the pocket opening's bottom
+    const depth = sp ? Math.min(Math.max(x - sp[0], openBottom - y), sp[1] - x) : -1;
     return F(x, y, gap - (gap - underGap) * sm(depth / 2.5));
   } : null;
   return { front: F, back: B, side: S };

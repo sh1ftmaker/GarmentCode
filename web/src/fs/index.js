@@ -45,12 +45,13 @@ import * as wahid from './wahid.js';
 import * as paco from './paco.js';
 import * as lily from './lily.js';
 import * as percy from './percy.js';
+import * as ashley from './ashley.js';
 
 /** Designs with a 3D adapter (seams + placement). */
 // diana.js drapes cleanly, but its cowl settles as a high funnel neck instead of the
 // design's draped neckline, so Diana stays pattern-only until that looks right.
 void diana;
-export const ADAPTERS = { bruce, hugo, teagan, sven, aaron, simon, shelly, titan, charlie, penelope, uma, brian, huey, yuri, wahid, paco, lily, percy };
+export const ADAPTERS = { bruce, hugo, teagan, sven, aaron, simon, shelly, titan, charlie, penelope, uma, brian, huey, yuri, wahid, paco, lily, percy, ashley };
 // Drafted but without any usable outline in the browser (Gozer draws its ghost only as text)
 const UNSUPPORTED = new Set(['gozer']);
 const CATALOG = Object.fromEntries(FS_CATALOG.filter(d => !UNSUPPORTED.has(d.id)).map(d => [d.id, d]));

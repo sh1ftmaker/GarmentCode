@@ -5,6 +5,10 @@
 import { fsMeasurements, pick } from './measure.js';
 import { opsBetween, chain, lowerSections, fsOptions, waistBandMap } from './lower.js';
 import { legPlacement } from './titan.js';
+import { pathEdges } from './convert.js';
+import { gatherSeams } from './legbands.js';
+
+const edgeLen = (part, op) => { const e = pathEdges(part.paths.seam)[op]; let l = 0; for (let i = 1; i < e.length; i++) l += Math.hypot(e[i][0] - e[i - 1][0], e[i][1] - e[i - 1][1]); return l; };
 
 export const id = 'lily';
 export const name = 'Lily leggings';
@@ -57,9 +61,12 @@ export function cutLegSeams(fp, bp, pf, pb) {
   const bOut = opsBetween(bp, pb.hemOut, pb.waistOut), bIn = opsBetween(bp, pb.fork, pb.hemIn), bCross = opsBetween(bp, pb.waistIn, pb.fork);
   const seams = [];
   for (const s of ['_r', '_l']) {
+    // outseam (waist down) and inseam (hem up), one seam per front edge: a cut-off leg can
+    // have a sliver of an edge at the hem, which convertDraft would merge away in a long chain
+    const L = (piece, op) => edgeLen(piece.startsWith('front') ? fp : bp, op);
     seams.push(
-      { a: chain('front' + s, fOut), b: chain('back' + s, bOut, true) },    // outseam, waist down
-      { a: chain('front' + s, fIn), b: chain('back' + s, bIn, true) },      // inseam, hem up
+      ...gatherSeams(chain('front' + s, fOut), chain('back' + s, bOut, true), L),
+      ...gatherSeams(chain('front' + s, fIn), chain('back' + s, bIn, true), L),
     );
   }
   seams.push(
@@ -73,7 +80,7 @@ export function cutLegSeams(fp, bp, pf, pb) {
   };
 }
 
-const pts = (P) => ({ waistOut: P.styleWaistOutLily, waistIn: P.styleWaistInLily, hemOut: P.bottomOut, hemIn: P.bottomIn, fork: P.fork });
+const pts = (P) => ({ waistOut: P.styleWaistOutLily, waistIn: P.styleWaistInLily, hemOut: P.bottomOut || P.floorOut, hemIn: P.bottomIn || P.floorIn, fork: P.fork });
 
 export function spec(o, draft) {
   const parts = draft.parts[0], fp = parts['lily.front'], bp = parts['lily.back'];
