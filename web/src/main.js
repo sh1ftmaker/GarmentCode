@@ -10,7 +10,7 @@ import { GRAIN_MODES, GRAIN_NAMES, GRAIN_HELP, grainMode, pieceGrains } from './
 import { buildPieces, sewingSteps, pieceName, cutText } from './pieces.js';
 import { autoLayout, layoutLength, findProblems, regions, fabricToBuy } from './layout.js';
 import { primitives, fabricPrims, toSVG, layoutPDF, patternPDF, planSheet, PAPERS, toDXF, yardText } from './export.js';
-import { FS_DESIGNS, fsDefaults, isFS, fsPattern, fsSVG, fsSettings, fsRandomize } from './fs/index.js';
+import { ADAPTERS, fsInfo, fsList, ensureFS, fsDefaults, isFS, fsPattern, fsSVG, fsSettings, fsRandomize } from './fs/index.js';
 import { armAxes as computeArmAxes } from './fs/place.js';   // arm axes, for wrapping sleeves
 import { History, compactSnapshot, expandSnapshot, encodeShare, decodeShare, saves, profiles, lastState, prefs } from './state.js';
 
@@ -42,7 +42,7 @@ const viewer = new Viewer($('#three'));
 const bodies = {};            // base name -> { base, prep, sdfBuf }
 let sdf = null, sdfReady = Promise.resolve(), sdfToken = 0;
 let sim = null, pattern = null, genToken = 0, paused = false, flat = false;
-const cut = { pieces: null, layout: null, alt: null, edited: false, key: '', sa: 1.5, folded: false, job: 0 };
+const cut = { pieces: null, layout: null, alt: null, edited: false, key: '', sa: 1.5, folded: false, job: 0, material: null };
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // ---------------------------------------------------------------- status & toasts
@@ -180,6 +180,7 @@ async function regenerate() {
     const list = names.map(n => n.toLowerCase()).join(' and ') || 'a panel';
     w.push(`Pattern issue: the ${names.length > 1 ? 'outlines' : 'outline'} of the ${list} ${names.length > 1 ? 'cross themselves' : 'crosses itself'}, so the drape may look odd. Usually a neckline or armhole that's too deep or wide for this body.`);
   }
+  if (pat.noDrape) w.push(`${fsInfo(S.source).name} has no 3D drape yet, so the mannequin stays bare. Open the pattern (Pattern button) or the Cutting tab to see its ${pat.panels.length} pieces.`);
   if (pat.warnings?.length) w.push(`FreeSewing: ${pat.warnings.join(' ')}`);
   warn(w.join(' '));
   startDrape();
@@ -189,6 +190,12 @@ async function regenerate() {
 
 function startDrape() {
   sim = null;
+  if (pattern?.noDrape) {
+    viewer.clearGarment();
+    status(`Pattern only · ${pattern.panels.length} pieces`);
+    updateDrapeChip();
+    return;
+  }
   if (!pattern || !pattern.panels.length || !sdf) {
     viewer.clearGarment();
     status(pattern && !pattern.panels.length ? 'Empty design' : 'Ready');
@@ -258,6 +265,7 @@ async function applySnapshot(snap, { record = true } = {}) {
   if (snap.fabric) Object.assign(S.fabric, snap.fabric);
   S.grain = { all: snap.grain?.all || 'straight', pieces: { ...(snap.grain?.pieces || {}) } };
   S.source = isFS(snap.source) ? snap.source : null;
+  if (S.source) await ensureFS(S.source);
   if (S.source) {
     S.design = snap.design || fsDefaults(S.source);
     S.template = `fs:${S.source}`;
@@ -310,7 +318,7 @@ function paramRow(path, node) {
     const opts = [...(node.range || [])];
     if (node.type === 'select_null' && !opts.includes(null)) opts.push(null);
     const sel = el('select', { 'aria-label': label }, opts.map(o => {
-      const op = el('option', { value: JSON.stringify(o) }, valueName(o));
+      const op = el('option', { value: JSON.stringify(o) }, node.labels?.[o] ?? valueName(o));
       if (JSON.stringify(o) === JSON.stringify(node.v)) op.selected = true;
       return op;
     }));
@@ -359,7 +367,7 @@ function groupEl(name, node, path) {
 function renderDesignUI() {
   const root = $('#design-params');
   root.innerHTML = '';
-  $$('.tpl').forEach(t => t.classList.toggle('active', t.dataset.id === S.template));
+  renderTemplates();
   $('#export-menu [data-x="svg"]').textContent = S.source ? 'FreeSewing pattern SVG' : 'GarmentCode pattern SVG';
   $('#export-menu [data-x="spec"]').textContent = S.source ? 'FreeSewing settings JSON' : 'Pattern specification JSON';
   $('#export-menu [data-x="design"]').hidden = !!S.source;
@@ -380,7 +388,6 @@ function renderDesignUI() {
     for (const g of other) { g.classList.add('dim'); root.append(g); }
   }
   if (!root.children.length) root.append(el('p', { class: 'muted' }, 'No parameters match your search.'));
-  $$('.tpl').forEach(t => t.classList.toggle('active', t.dataset.id === S.template));
 }
 
 /** Garment-wide grain (skirt and bodice pieces; grain.js), shown for skirts, dresses and tops. */
@@ -405,27 +412,38 @@ function setGrain(grain) {
   if (!$('#pattern-card').hidden) refreshPatternSVG();
 }
 
-/** Options of a FreeSewing design: every option is shown (there are only a few). */
+/** Group title of a FreeSewing option menu ('style.collar' -> 'Style · Collar'). */
+const fsGroupName = (g) => g.split('.').map(w => groupName(w)).join(' · ');
+/**
+ * Options of a FreeSewing design. Adapted designs have a few hand-picked options; the rest
+ * show FreeSewing's own option menus (fit, style, ...; "advanced" ones only under "All").
+ */
 function renderFSDesignUI(root) {
-  const A = FS_DESIGNS[S.source];
+  const info = fsInfo(S.source), A = ADAPTERS[S.source];
+  const by = info.designers.length ? ` by ${info.designers.join(', ')}` : '';
   root.append(el('div', { class: 'fs-note' },
-    el('b', {}, A.name), ' · a ', el('a', { href: A.url, target: '_blank', rel: 'noopener' }, 'FreeSewing'),
-    ` design${A.author ? ` by ${A.author}` : ''} (MIT), drafted in your browser from your measurements. `, A.stretchNote));
+    el('b', {}, info.name), ' · a ', el('a', { href: info.url, target: '_blank', rel: 'noopener' }, 'FreeSewing'),
+    ` design${by} (MIT), drafted in your browser from your measurements. `,
+    A ? A.stretchNote : el('span', {}, el('b', {}, 'No 3D drape yet: '), 'FreeSewing doesn’t say which edges are sewn together, so this design is shown as its pattern. The pattern view, cutting layout and exports work as usual.')));
   const q = S.search.trim().toLowerCase();
+  let hidden = 0;
   for (const [g, node] of Object.entries(S.design)) {
+    const expert = !A && g.startsWith('advanced');
     const body = el('div', { class: 'gbody' });
     for (const [k, v] of Object.entries(node)) {
-      if (!isParam(v) || (q && !(v.name || k).toLowerCase().includes(q))) continue;
+      if (!isParam(v) || (q && !(v.name || k).toLowerCase().includes(q) && !k.toLowerCase().includes(q))) continue;
+      if (expert && S.detail === 'simple' && !q) { hidden++; continue; }
       const r = paramRow([g, k], v);
       if (r) body.append(r);
     }
     if (!body.children.length) continue;
     const key = `fs:${g}:closed`;
-    const det = el('details', { class: 'group' }, el('summary', {}, groupName(g)), body);
-    det.open = !openGroups.has(key);
+    const det = el('details', { class: 'group' }, el('summary', {}, fsGroupName(g)), body);
+    det.open = !openGroups.has(key) && !(expert && !q);
     det.ontoggle = () => { det.open ? openGroups.delete(key) : openGroups.add(key); };
     root.append(det);
   }
+  if (hidden) root.append(el('p', { class: 'muted small' }, `${hidden} advanced option${hidden === 1 ? '' : 's'} hidden. Choose “All” to show them.`));
   if (root.children.length < 2) root.append(el('p', { class: 'muted' }, 'No parameters match your search.'));
 }
 
@@ -444,11 +462,15 @@ async function commitParam(path, value) {
   S.design = await py('design');
   S.template = null;
   const structural = path[0] === 'meta' || ['levels-skirt.base', 'levels-skirt.level', 'godet-skirt.base', 'left.enable_asym'].includes(path.join('.'));
-  if (structural) renderDesignUI(); else $$('.tpl').forEach(t => t.classList.remove('active'));
+  if (structural) renderDesignUI(); else renderTemplates();
   commitHistory();
   regenerate();
 }
 
+// ---------------------------------------------------------------- design picker
+// GarmentCode templates (drafted by GarmentCode in Pyodide) and every FreeSewing design:
+// a "current design" card, a row of recently used designs, and a gallery dialog with
+// categories, search and filters.
 const TPL_ICONS = {
   tee: 'M14 8l8-4h12l8 4 6 10-7 4-3-5v31H18V17l-3 5-7-4z',
   longsleeve: 'M14 8l8-4h12l8 4 8 30-6 2-6-20v28H18V20l-6 20-6-2z',
@@ -464,40 +486,153 @@ const TPL_ICONS = {
   trousers: 'M14 4h28l4 48h-12l-6-34-6 34H10z',
   shorts: 'M14 10h28l4 22H32l-4-10-4 10H10z',
 };
+const KIND_ORDER = ['Tops', 'Jackets & coats', 'Dresses', 'Skirts', 'Trousers & shorts', 'One-pieces', 'Swim & underwear',
+  'Historical', 'Blocks', 'Accessories', 'Costumes', 'Toys', 'Other'];
+let fsThumbs = null;   // FreeSewing pattern thumbnails (src/fs/meta/thumbs.json), loaded with the gallery
+const loadThumbs = () => (fsThumbs ||= fetch(new URL('./fs/meta/thumbs.json', import.meta.url)).then(r => r.json()).catch(() => ({})));
+/** Every design the picker offers: { key, src: 'gc'|'fs', id, name, kind, by, description, drape, difficulty, icon } */
+function allDesigns() {
+  const gc = TEMPLATES.map(t => ({ key: t.id, src: 'gc', id: t.id, name: t.name, kind: t.kind, by: 'GarmentCode', description: t.description || '', drape: true, difficulty: 0, icon: TPL_ICONS[t.id] || TPL_ICONS.tee }));
+  const fs = fsList().map(d => ({ key: `fs:${d.id}`, src: 'fs', id: d.id, name: d.name, kind: d.kind, by: d.designers.join(', '), description: d.description, drape: d.drape, difficulty: d.difficulty, icon: d.icon, tags: d.tags }));
+  return [...gc, ...fs];
+}
+const designByKey = (key) => allDesigns().find(d => d.key === key);
+function thumbSVG(d, size = 56) {
+  if (d.icon) return `<svg viewBox="0 0 56 56" width="${size}" height="${size}" aria-hidden="true"><path class="thumb-path" d="${d.icon}"/></svg>`;
+  const path = thumbCache[d.id];
+  return path ? `<svg viewBox="0 0 100 100" width="${size}" height="${size}" aria-hidden="true"><path class="thumb-path" d="${path}"/></svg>`
+    : `<svg viewBox="0 0 100 100" width="${size}" height="${size}" aria-hidden="true"><rect class="thumb-path" x="22" y="14" width="56" height="72" rx="6"/></svg>`;
+}
+const thumbCache = {};
+async function ensureThumbs() { Object.assign(thumbCache, await loadThumbs()); }
+const diffDots = (n) => (n ? `<span class="diff" title="Difficulty ${n} of 5">${'●'.repeat(n)}<i>${'●'.repeat(5 - n)}</i></span>` : '');
+
+const RECENT_MAX = 8;
+function recentKeys() { const r = prefs.get().recent; return Array.isArray(r) ? r.filter(k => designByKey(k)) : []; }
+function pushRecent(key) { prefs.set({ recent: [key, ...recentKeys().filter(k => k !== key)].slice(0, RECENT_MAX) }); }
+
+async function selectGC(t) {
+  if (!defaults.design) return;
+  cut.material = null;
+  S.template = t.id; S.source = null;
+  await py('setDesign', { design: applyTemplate(defaults.design, t) });
+  S.design = await py('design');
+  pushRecent(t.id);
+  renderDesignUI(); renderTemplates();
+  commitHistory();
+  regenerate();
+}
+async function selectFS(id) {
+  cut.material = null;
+  try { await ensureFS(id); } catch (e) { warn(e.message); return; }
+  S.source = id; S.template = `fs:${id}`;
+  S.design = fsDefaults(id);
+  pushRecent(`fs:${id}`);
+  renderDesignUI(); renderTemplates();
+  commitHistory();
+  await regenerate();
+  // no drape: the pattern is the picture (on wide screens, where it fits beside the mannequin)
+  if (!ADAPTERS[id] && $('#pattern-card').hidden && matchMedia('(min-width: 821px)').matches) $('#btn-pattern').click();
+}
+const selectDesign = (key) => (key.startsWith('fs:') ? selectFS(key.slice(3)) : selectGC(TEMPLATES.find(t => t.id === key) || TEMPLATES[0]));
+
+/** The current-design card and the recent row. */
 function renderTemplates() {
+  const key = S.source ? `fs:${S.source}` : S.template;
+  const d = key && designByKey(key);
+  $('#cd-thumb').innerHTML = d ? thumbSVG(d, 56) : thumbSVG({ icon: TPL_ICONS.tee }, 56);
+  $('#cd-name').textContent = d ? d.name : 'Custom design';
+  $('#cd-kicker').innerHTML = d
+    ? `${d.src === 'gc' ? 'GarmentCode' : `FreeSewing · ${esc(d.by)}`} <span class="pill ${d.drape ? 'drape' : 'flat'}">${d.drape ? '3D' : 'Pattern'}</span>`
+    : 'GarmentCode · edited';
+  $('#cd-desc').textContent = d ? (d.description || '') : 'Your own combination of GarmentCode parameters.';
+  if (d && !d.icon) ensureThumbs().then(() => { if ((S.source ? `fs:${S.source}` : S.template) === key) $('#cd-thumb').innerHTML = thumbSVG(d, 56); });
   const root = $('#templates');
   root.innerHTML = '';
-  for (const t of TEMPLATES) {
-    const b = el('button', { class: 'tpl', 'data-id': t.id, title: t.name });
-    b.innerHTML = `<svg viewBox="0 0 56 56" aria-hidden="true"><path d="${TPL_ICONS[t.id] || TPL_ICONS.tee}" fill="currentColor" fill-opacity=".16" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
-    b.append(el('span', {}, t.name));
-    b.onclick = async () => {
-      if (!defaults.design) return;
-      S.template = t.id; S.source = null;
-      await py('setDesign', { design: applyTemplate(defaults.design, t) });
-      S.design = await py('design');
-      renderDesignUI();
-      commitHistory();
-      regenerate();
-    };
+  let keys = recentKeys();
+  if (keys.length < 4) keys = [...keys, ...['tee', 'hoodie', 'aline', 'trousers', 'fs:hugo', 'fs:teagan'].filter(k => !keys.includes(k))].slice(0, 6);
+  for (const k of keys) {
+    const r = designByKey(k);
+    const b = el('button', { class: 'tpl' + (k === key ? ' active' : ''), 'data-id': k, title: `${r.name} (${r.src === 'gc' ? 'GarmentCode' : 'FreeSewing'})` });
+    b.innerHTML = thumbSVG(r, 44);
+    b.append(el('span', {}, r.name.length > 24 ? r.name.replace(/^(\w+) /, '') : r.name));
+    b.onclick = () => selectDesign(k);
     root.append(b);
   }
-  // FreeSewing designs (drafted in JS instead of GarmentCode)
-  root.append(el('div', { class: 'tpl-sep', title: 'Designs from FreeSewing.eu (MIT)' }, 'FreeSewing'));
-  for (const A of Object.values(FS_DESIGNS)) {
-    const b = el('button', { class: 'tpl', 'data-id': `fs:${A.id}`, title: `${A.name} (FreeSewing)` });
-    b.innerHTML = `<svg viewBox="0 0 56 56" aria-hidden="true"><path d="${A.icon}" fill="currentColor" fill-opacity=".16" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
-    b.append(el('span', {}, A.short));
-    b.onclick = () => {
-      S.source = A.id; S.template = `fs:${A.id}`;
-      S.design = fsDefaults(A.id);
-      renderDesignUI();
-      commitHistory();
-      regenerate();
-    };
-    root.append(b);
+  const more = el('button', { class: 'tpl more', title: 'Browse every design' }, el('b', {}, '⋯'), el('span', {}, `All ${allDesigns().length} designs`));
+  more.onclick = openGallery;
+  root.append(more);
+  if (keys.some(k => !designByKey(k).icon)) ensureThumbs().then(() => { $$('#templates .tpl[data-id^="fs:"]').forEach(b => { const r = designByKey(b.dataset.id); if (r && !r.icon) b.querySelector('svg').outerHTML = thumbSVG(r, 44); }); });
+}
+
+const gal = { kind: 'All', src: 'all', drapeOnly: false, q: '' };
+async function openGallery() {
+  try { const g = prefs.get().gallery; if (g) Object.assign(gal, { kind: g.kind || 'All', src: g.src || 'all', drapeOnly: !!g.drapeOnly }); } catch { /* defaults */ }
+  gal.q = '';
+  $('#gal-search').value = '';
+  $('#gal-3d').checked = gal.drapeOnly;
+  $$('#gal-source .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.src === gal.src));
+  renderGallery();
+  $('#dlg-gallery').showModal();
+  if (matchMedia('(min-width: 821px)').matches) $('#gal-search').focus();
+  await ensureThumbs();
+  renderGallery();
+  $('#gal-body .gcard.active')?.scrollIntoView({ block: 'center' });
+}
+function galleryMatches() {
+  const q = gal.q.trim().toLowerCase();
+  const words = q.split(/\s+/).filter(Boolean);
+  return allDesigns().filter(d => {
+    if (gal.src !== 'all' && d.src !== gal.src) return false;
+    if (gal.drapeOnly && !d.drape) return false;
+    if (!words.length) return true;
+    const hay = `${d.name} ${d.id} ${d.kind} ${d.by} ${d.description} ${(d.tags || []).join(' ')} ${d.src === 'gc' ? 'garmentcode' : 'freesewing'}`.toLowerCase();
+    return words.every(w => hay.includes(w));
+  });
+}
+function renderGallery() {
+  const list = galleryMatches();
+  const key = S.source ? `fs:${S.source}` : S.template;
+  // category chips with counts (for the current source / search filters)
+  const counts = {};
+  for (const d of list) counts[d.kind] = (counts[d.kind] || 0) + 1;
+  const kinds = KIND_ORDER.filter(k => counts[k]);
+  if (gal.kind !== 'All' && !counts[gal.kind]) gal.kind = 'All';
+  const chips = $('#gal-kinds');
+  chips.innerHTML = '';
+  for (const k of ['All', ...kinds]) {
+    const c = el('button', { class: 'chip' + (gal.kind === k ? ' on' : ''), role: 'tab', 'aria-selected': String(gal.kind === k) }, k, el('small', {}, String(k === 'All' ? list.length : counts[k])));
+    c.onclick = () => { gal.kind = k; saveGal(); renderGallery(); $('#gal-body').scrollTop = 0; };
+    chips.append(c);
+  }
+  const shown = gal.kind === 'All' ? list : list.filter(d => d.kind === gal.kind);
+  $('#gal-count').textContent = `${shown.length} design${shown.length === 1 ? '' : 's'} · ${shown.filter(d => d.drape).length} in 3D`;
+  const body = $('#gal-body');
+  body.innerHTML = '';
+  if (!shown.length) { body.append(el('div', { class: 'gal-empty' }, 'No designs match. Try another search or clear the filters.')); return; }
+  for (const k of KIND_ORDER) {
+    const ds = shown.filter(d => d.kind === k)
+      .sort((a, b) => (b.drape - a.drape) || (a.src === b.src ? 0 : a.src === 'gc' ? -1 : 1) || a.name.localeCompare(b.name));
+    if (!ds.length) continue;
+    const grid = el('div', { class: 'gal-grid' });
+    for (const d of ds) {
+      const b = el('button', { class: 'gcard' + (d.key === key ? ' active' : ''), 'data-id': d.key, 'aria-label': `${d.name}, ${d.src === 'gc' ? 'GarmentCode' : 'FreeSewing by ' + d.by}${d.drape ? ', drapes in 3D' : ', pattern only'}` });
+      b.innerHTML = `<div class="gthumb">${thumbSVG(d, 120)}<span class="pill ${d.drape ? 'drape' : 'flat'}">${d.drape ? '3D' : 'Pattern'}</span></div>
+        <div class="gtext"><div class="gname">${esc(d.name)}</div>
+        <div class="gby">${d.src === 'gc' ? 'GarmentCode' : esc(d.by)} ${diffDots(d.difficulty)}</div>
+        ${d.description && !/^A description for/i.test(d.description) ? `<div class="gdesc">${esc(d.description)}</div>` : ''}</div>`;
+      b.onclick = () => { $('#dlg-gallery').close(); selectDesign(d.key); };
+      grid.append(b);
+    }
+    body.append(el('section', { class: 'gal-sec' }, el('h4', {}, k, el('small', {}, `${ds.length}`)), grid));
   }
 }
+function saveGal() { prefs.set({ gallery: { kind: gal.kind, src: gal.src, drapeOnly: gal.drapeOnly } }); }
+$('#btn-browse').onclick = openGallery;
+$('#gal-search').oninput = (e) => { gal.q = e.target.value; renderGallery(); };
+$('#gal-search').onkeydown = (e) => { if (e.key === 'Enter') { const first = $('#gal-body .gcard'); if (first) first.click(); } };
+$('#gal-3d').onchange = (e) => { gal.drapeOnly = e.target.checked; saveGal(); renderGallery(); };
+$$('#gal-source .seg-btn').forEach(b => { b.onclick = () => { gal.src = b.dataset.src; $$('#gal-source .seg-btn').forEach(x => x.classList.toggle('active', x === b)); saveGal(); renderGallery(); }; });
 
 // ---------------------------------------------------------------- body UI
 const toUnit = (k, v) => (ANGLE_KEYS.has(k) || S.unit === 'cm') ? v : v / 2.54;
@@ -619,14 +754,33 @@ function measureNote() {   // printed on every piece so a pattern can be matched
   const parts = [['Bust', 'bust'], ['Waist', 'waist'], ['Hips', 'hips'], ['Height', 'height']].filter(([, k]) => m[k] != null).map(([n, k]) => `${n} ${f(k)}`);
   return parts.length ? `${parts.join(' · ')} ${S.unit === 'in' ? 'in' : 'cm'}` : '';
 }
+// FreeSewing designs without an adapter list pieces per material (fabric, lining, interfacing...)
+const MATERIAL_NAMES = { fabric: 'Main fabric', lining: 'Lining', interfacing: 'Interfacing', ribbing: 'Ribbing', rigidInterfacing: 'Rigid interfacing', undersideFabric: 'Underside fabric' };
+const materialName = (k) => MATERIAL_NAMES[k] || k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase());
+function showMaterials(data) {
+  const mats = data.materials || [];
+  $('#material-wrap').hidden = mats.length < 2;
+  const sel = $('#cut-material');
+  if (mats.length >= 2) {
+    sel.innerHTML = '';
+    for (const k of mats) sel.append(el('option', { value: k }, materialName(k)));
+    sel.value = data.material || mats[0];
+  }
+  const others = Object.entries(data.others || {});
+  $('#cut-others').hidden = !others.length;
+  $('#cut-others').textContent = others.length
+    ? `Also cut from ${others.map(([k, list]) => `${materialName(k).toLowerCase()}: ${list.join(', ')}`).join('; ')}.`
+    : '';
+}
 async function ensurePieces() {
   const sa = +$('#seam-allowance').value;
   const note = measureNote();
-  const key = `${genToken}|${sa}|${note}|${JSON.stringify(S.grain)}`;
+  const key = `${genToken}|${sa}|${note}|${JSON.stringify(S.grain)}|${cut.material || ''}`;
   if (cut.key === key && cut.pieces) return false;
   const data = S.source
-    ? await fsPattern(S.source, S.design, S.measurements, curBody, { res: 0.5, drape: false })   // the real (stretch) pattern
+    ? await fsPattern(S.source, S.design, S.measurements, curBody, { res: 0.5, drape: false, material: cut.material })   // the real (stretch) pattern
     : await py('pieces', { res: 0.5 });
+  showMaterials(data);
   const set = buildPieces(data, { sa, note, grain: S.grain });
   const sameSet = cut.pieces && cut.pieces.pieces.map(p => p.id).join() === set.pieces.map(p => p.id).join() && cut.sa === sa;
   cut.pieces = set; cut.sa = sa; cut.key = key;
@@ -819,6 +973,7 @@ $('#fabric-custom').onchange = () => { prefs.set({ fabricCustom: $('#fabric-cust
 $$('#fold-seg .seg-btn').forEach(b => { b.onclick = () => { if ((b.dataset.fold === '1') !== cut.folded) { setFolded(b.dataset.fold === '1'); reArrange(); } }; });
 $('#allow-rotate').onchange = reArrange;
 $('#seam-allowance').onchange = () => { cut.key = ''; refreshCut(); };
+$('#cut-material').onchange = (e) => { cut.material = e.target.value; cut.key = ''; refreshCut(); };
 $('#show-sewline').onchange = () => { if (cut.pieces) renderLayout(); };
 $('#paper').onchange = () => prefs.set({ paper: $('#paper').value });
 $('#btn-print-pdf').onclick = async () => { try { await cuttingExport(`pdf-${$('#paper').value}`); } catch (e) { status('Ready'); warn(e.message); } };
@@ -894,7 +1049,7 @@ $('#btn-random').onclick = async () => {
   S.design = await py('design'); S.template = null;
   renderDesignUI(); commitHistory(); regenerate();
 };
-$('#btn-reset').onclick = () => { (S.source ? $(`.tpl[data-id="fs:${S.source}"]`) : $$('.tpl')[0])?.click(); };
+$('#btn-reset').onclick = () => selectDesign(S.source ? `fs:${S.source}` : (S.template && designByKey(S.template) ? S.template : 'tee'));
 $('#btn-upload').onclick = () => $('#file-input').click();
 $('#file-input').onchange = async (e) => {
   const f = e.target.files[0];
@@ -981,7 +1136,7 @@ function renderSaves() {
   if (!items.length) list.append(el('div', { class: 'empty' }, 'No saved designs yet. They stay in this browser.'));
   for (const s of items) {
     const img = el('img', { src: s.thumb || '', alt: s.name, title: 'Open' });
-    img.onclick = async () => { $('#dlg-saves').close(); await applySnapshot(expandSnapshot(s.state, defaults)); toast(`Opened “${s.name}”`); };
+    img.onclick = async () => { $('#dlg-saves').close(); if (isFS(s.state.s)) await ensureFS(s.state.s); await applySnapshot(expandSnapshot(s.state, defaults)); toast(`Opened “${s.name}”`); };
     const del = el('button', { class: 'icon-btn', title: 'Delete', 'aria-label': `Delete ${s.name}` }, '🗑');
     del.onclick = () => { saves.remove(s.id); renderSaves(); };
     list.append(el('div', { class: 'save' }, img, el('div', { class: 'meta' }, el('div', {}, s.name, el('small', {}, new Date(s.ts).toLocaleDateString())), del)));
@@ -1014,7 +1169,7 @@ function download(name, data, type = 'text/plain') {
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
-const designTitle = () => (S.source ? FS_DESIGNS[S.source].name : TEMPLATES.find(t => t.id === S.template)?.name || 'Custom design');
+const designTitle = () => (S.source ? fsInfo(S.source).name : TEMPLATES.find(t => t.id === S.template)?.name || 'Custom design');
 const slug = () => designTitle().toLowerCase().replace(/[^a-z0-9]+/g, '-');
 function garmentOBJ() {
   if (!sim) return '';
@@ -1114,10 +1269,10 @@ $('#export-menu').addEventListener('click', async (e) => {
     let start = null, fromShare = false;
     const m = location.hash.match(/#s=([\w-]+)/);
     if (m) {
-      try { start = expandSnapshot(await decodeShare(m[1]), defaults); fromShare = true; toast('Opened a shared design'); }
+      try { const c = await decodeShare(m[1]); if (isFS(c.s)) await ensureFS(c.s); start = expandSnapshot(c, defaults); fromShare = true; toast('Opened a shared design'); }
       catch (e) { console.error(e); warn('This share link could not be read.'); }
     }
-    if (!start && lastState.get()) { try { start = expandSnapshot(lastState.get(), defaults); } catch { start = null; } }
+    if (!start && lastState.get()) { try { const c = lastState.get(); if (isFS(c.s)) await ensureFS(c.s); start = expandSnapshot(c, defaults); } catch { start = null; } }
     S.template = start ? null : 'tee';
     if (!start) start = { design: defaults.design, base: 'neutral', measurements: { ...defaults.presets.neutral }, fabric: null };
     void fromShare;
@@ -1142,4 +1297,4 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 }
 
 // debugging handle (used by the automated visual tests)
-window.__gc = { viewer, get sim() { return sim; }, get sdf() { return sdf; }, get pattern() { return pattern; }, get state() { return S; } };
+window.__gc = { viewer, selectDesign, get sim() { return sim; }, get sdf() { return sdf; }, get pattern() { return pattern; }, get state() { return S; } };

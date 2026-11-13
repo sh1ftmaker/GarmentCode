@@ -82,7 +82,7 @@ export function buildPieces(data, { sa = 1.5, note = '', grain = null } = {}) {
     for (const [x, y] of cut) { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); }
     const cx = (minX + maxX) / 2, h = maxY - minY;
     return {
-      id: p.name, raw: p.name, name: pieceName(p.name), cat: category(p.name), grainMode: gr.mode, grainVec: gr.vec,
+      id: p.name, raw: p.name, name: p.title || pieceName(p.name), cat: category(p.name), grainMode: gr.mode, grainVec: gr.vec,
       sew, cut, ranges, notches: [], seamLabels: [], reversed,
       grain: [[cx, minY + h * 0.2], [cx, maxY - h * 0.2]],
       bbox: [minX, minY, maxX, maxY], area: Math.abs(signedArea(sew)),

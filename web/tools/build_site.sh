@@ -14,8 +14,10 @@ touch "$OUT/.nojekyll"
 # `npm install` in web/ (the Pages workflow does that).
 ESBUILD="$ROOT/web/node_modules/.bin/esbuild"
 if [ -x "$ESBUILD" ] && [ -d "$ROOT/web/node_modules/@freesewing/core" ]; then
-  "$ESBUILD" "$ROOT/web/tools/freesewing-entry.mjs" --bundle --format=esm --minify \
-    --legal-comments=eof --log-level=warning --outfile="$OUT/src/fs/vendor/freesewing.js"
+  # one chunk per design (plus shared chunks), loaded on first use
+  "$ESBUILD" "$ROOT/web/tools/freesewing-entry.mjs" --bundle --format=esm --minify --splitting \
+    --legal-comments=eof --log-level=warning --entry-names=freesewing --chunk-names=[name]-[hash] \
+    --outdir="$OUT/src/fs/vendor"
 else
   echo "warning: web/node_modules is missing (run npm install in web/); FreeSewing designs will not load" >&2
 fi

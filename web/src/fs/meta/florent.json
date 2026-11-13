@@ -1,0 +1,1 @@
+{"id":"florent","name":"Florent flat cap","design":{"fit":{"headEase":{"v":2,"range":[0,5],"type":"float","fs":"pct","name":"Head ease (%)","help":"The amount of ease around your head"}}},"dynamicMenus":[],"measurements":["head"],"optionalMeasurements":[],"parts":{"brimBottom":"Brim bottom","brimInterfacing":"Brim interfacing","brimTop":"Brim Top","side":"Side","top":"Top"}}

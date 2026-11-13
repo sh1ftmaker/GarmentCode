@@ -80,9 +80,19 @@
       <section class="page active" data-page="design">
         <div class="page-head">
           <h2>Design</h2>
-          <p class="muted">Pick a starting point, then tune GarmentCode's parameters.</p>
+          <p class="muted">Pick a design, then tune its parameters.</p>
         </div>
-        <div class="templates" id="templates"></div>
+        <div class="current-design" id="current-design">
+          <div class="cd-thumb" id="cd-thumb" aria-hidden="true"></div>
+          <div class="cd-text">
+            <div class="cd-kicker" id="cd-kicker">GarmentCode</div>
+            <div class="cd-name" id="cd-name">Classic T-shirt</div>
+            <div class="cd-desc" id="cd-desc"></div>
+          </div>
+          <button class="btn primary cd-browse" id="btn-browse" aria-haspopup="dialog">Browse all designs</button>
+        </div>
+        <div class="recent-head" id="recent-head">Recent</div>
+        <div class="templates" id="templates" aria-label="Recently used designs"></div>
         <div class="toolrow">
           <button class="btn" id="btn-random" title="Randomise unlocked parameters">🎲 Surprise me</button>
           <button class="btn ghost" id="btn-reset">Reset</button>
@@ -186,7 +196,10 @@
               <option value="1">1 cm (⅜″)</option>
               <option value="1.5" selected>1.5 cm (⅝″)</option>
             </select></label>
+          <label class="field" id="material-wrap" hidden><span>Cut from</span>
+            <select id="cut-material"></select></label>
         </div>
+        <p class="muted small" id="cut-others" hidden></p>
         <div class="field"><span>Lay the fabric</span>
           <div class="seg" role="group" aria-label="Fabric layers" id="fold-seg">
             <button class="seg-btn active" data-fold="0" aria-pressed="true">Single layer</button>
@@ -262,6 +275,27 @@
     <div class="saves" id="saves-list"></div>
   </dialog>
 
+  <dialog id="dlg-gallery" class="dialog gallery" aria-labelledby="gal-title">
+    <div class="card-head"><h3 id="gal-title">Choose a design</h3><button class="icon-btn" data-close aria-label="Close">✕</button></div>
+    <div class="gal-tools">
+      <input id="gal-search" class="search" type="search" placeholder="Search designs, designers, garments…" aria-label="Search designs" autocomplete="off">
+      <div class="gal-kinds" id="gal-kinds" role="tablist" aria-label="Categories"></div>
+      <div class="gal-filters">
+        <div class="seg" role="group" aria-label="Source" id="gal-source">
+          <button class="seg-btn active" data-src="all">All</button>
+          <button class="seg-btn" data-src="gc">GarmentCode</button>
+          <button class="seg-btn" data-src="fs">FreeSewing</button>
+        </div>
+        <label class="gal-check"><input type="checkbox" id="gal-3d"> 3D drape only</label>
+        <span class="gal-count muted small" id="gal-count"></span>
+      </div>
+    </div>
+    <div class="gal-body" id="gal-body"></div>
+    <div class="gal-foot muted small">
+      <span><span class="pill drape">3D</span> drapes on the mannequin · <span class="pill flat">Pattern</span> pattern, cutting layout and exports only (no 3D yet)</span>
+    </div>
+  </dialog>
+
   <dialog id="dlg-about" class="dialog">
     <div class="card-head"><h3>About this studio</h3><button class="icon-btn" data-close aria-label="Close">✕</button></div>
     <div class="about">
@@ -271,9 +305,9 @@
         <b>It is not affiliated with or endorsed by the GarmentCode authors.</b></p>
       <ul>
         <li><b>Patterns</b> are drafted by GarmentCode's original Python code, running in your browser through Pyodide.</li>
-        <li><b>FreeSewing designs</b> (Bruce boxer briefs, Hugo hoodie, Teagan T-shirt, Sven sweatshirt and Aaron A-shirt, all designed by Joost De Cock) are drafted by <a href="https://freesewing.eu" target="_blank" rel="noopener">FreeSewing</a>'s own code (MIT, by Joost De Cock and contributors) and converted into panels for the drape. Not affiliated with FreeSewing either.</li>
+        <li><b>FreeSewing designs</b>: the whole <a href="https://freesewing.eu" target="_blank" rel="noopener">FreeSewing</a> collection (72 designs by Joost De Cock and many other designers; each design names its designers in the picker) is drafted by FreeSewing's own code (MIT, by Joost De Cock and contributors) from your measurements. Every design gets its pattern, cutting layout and exports; the ones marked 3D (Bruce, Hugo, Teagan, Sven, Aaron) are also converted into panels for the drape. Not affiliated with FreeSewing either.</li>
         <li><b>The mannequin</b> is a measurement-driven morph of GarmentCode's base bodies.</li>
-        <li><b>The drape</b> is a lightweight real-time cloth simulation modelled on GarmentCode's simulation setup. It isn't the NVIDIA Warp simulator used for the GarmentCodeData dataset, and it has no cloth self-collision.</li>
+        <li><b>The drape</b> is a lightweight real-time cloth simulation modelled on GarmentCode's simulation setup. It isn't the NVIDIA Warp simulator used for the GarmentCodeData dataset.</li>
         <li><b>Nothing leaves your device.</b> Designs are saved in your browser.</li>
       </ul>
       <p class="muted small">If you use GarmentCode in research, please cite the original papers (see the repository README).</p>
