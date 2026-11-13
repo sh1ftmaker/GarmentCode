@@ -30,7 +30,8 @@ export function fsOptions(d) {
 }
 
 // ------------------------------------------------------------------ seam edges
-const near = (p, q) => p && q && Math.abs(p.x - q.x) < 0.01 && Math.abs(p.y - q.y) < 0.01;
+// (mm; FreeSewing nudges some points a hair apart, e.g. Titan's crotch seam start on a low waist)
+const near = (p, q) => p && q && Math.abs(p.x - q.x) < 0.5 && Math.abs(p.y - q.y) < 0.5;
 /**
  * Edge numbers (seam path operations, as convert.js numbers them) of a part's seam from
  * point `from` to point `to`, in drawing order. FreeSewing designs draw some seams with a
@@ -45,7 +46,8 @@ export function opsBetween(part, from, to, path = 'seam') {
     k++;
     const end = op.type === 'close' ? first : op.to;
     if (!on && near(cur, from)) on = true;
-    if (on) ids.push(k);
+    // ops shorter than convert.js keeps as edges (a hair-thin line) are left out
+    if (on && !(op.type !== 'curve' && near(cur, end))) ids.push(k);
     cur = end;
     if (on && near(end, to)) return ids;
   }
