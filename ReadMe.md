@@ -10,15 +10,16 @@ This fork adds **GarmentCode 3D Studio**, a static, browser-only web app (in [`w
 
 **Design**
 * The original GarmentCode Python (`pygarment` + `assets/garment_programs`) runs unchanged in [Pyodide](https://pyodide.org/) inside a Web Worker.
-* Starter templates, plain-language parameter names, an Essentials/All switch, search, and "Surprise me" randomisation with per-parameter locks.
+* A design gallery (categories, search, GarmentCode / FreeSewing and 3D filters, recently used designs), plain-language parameter names, an Essentials/All switch, search, and "Surprise me" randomisation with per-parameter locks.
 * Undo/redo, share links (the design is compressed into the URL), saved designs with thumbnails, and autosave, all stored in your browser.
 
 **FreeSewing designs**
-* Besides GarmentCode's programs, the app can drape designs from [FreeSewing](https://freesewing.eu) (MIT, by Joost De Cock and contributors): [Bruce](https://freesewing.eu/designs/bruce/) boxer briefs, the [Hugo](https://freesewing.eu/designs/hugo/) hoodie, the [Teagan](https://freesewing.eu/designs/teagan/) T-shirt, the [Sven](https://freesewing.eu/designs/sven/) sweatshirt and the [Aaron](https://freesewing.eu/designs/aaron/) A-shirt, all designed by Joost De Cock.
-* FreeSewing's own code drafts the pattern in your browser (bundled from `@freesewing/*` at build time). The app maps GarmentCode body measurements to FreeSewing's (girths GarmentCode doesn't have, such as `hips` at the top of the hip bone or the biceps and head, are measured on the mannequin), shows the design's options as sliders, and converts the draft into sewn, placed panels ([`web/src/fs/`](web/src/fs/)).
+* Besides GarmentCode's programs, the app includes the whole [FreeSewing](https://freesewing.eu) collection (MIT, by Joost De Cock and contributors): 72 designs by Joost De Cock and many other designers, each credited in the app's gallery. Every design drafts from your measurements and gets its pattern, a cutting layout (per material: fabric, lining, interfacing, ribbing) and the exports.
+* 15 of them also drape in 3D: Bruce, Hugo, Teagan, Sven, Aaron, Simon, Brian, Huey and Wahid (designed by Joost De Cock), Yuri (Biou), Shelly (Thrunic), Titan (Debra Bean and Joost De Cock), Charlie (Joost De Cock), Penelope (Wouter Van Wageningen) and Uma (Joost De Cock). The others are marked "Pattern": FreeSewing describes each piece's outline and cut list but not which edges are sewn together, so draping a design needs a small adapter.
+* FreeSewing's own code drafts the pattern in your browser (bundled from `@freesewing/*` at build time). The app maps GarmentCode body measurements to FreeSewing's (girths and lengths GarmentCode doesn't have, such as `hips` at the top of the hip bone, the biceps, head, knee, ankle and the crotch seam, are measured on the mannequin; [`web/src/fs/measure.js`](web/src/fs/measure.js)), shows the design's options as sliders, and converts the draft into sewn, placed panels ([`web/src/fs/`](web/src/fs/)).
 * Pieces start on body-hugging guide surfaces ([`web/src/fs/place.js`](web/src/fs/place.js)): bodices around the torso and over the shoulders, sleeves around the arms, the hood beside the head; sleeve caps, hoods, waistbands and cuffs are then snapped onto the edges they are sewn to.
 * Stretch designs (Bruce, Aaron, the ribbing of Hugo and Sven) are drafted with negative ease. The cloth simulation barely stretches, so the drape uses a relaxed copy (for Bruce: no negative ease at the hips, a third of it at the legs; ribbing unstretched). The pattern view, cutting layout and exports use the real pattern. Patch pockets and bindings are cut but not simulated.
-* Adding another design takes a small adapter (measurement mapping, options, seam table, placement); see [`web/src/fs/bruce.js`](web/src/fs/bruce.js) for a lower-body design and [`web/src/fs/hugo.js`](web/src/fs/hugo.js) for a top.
+* Draping another design takes a small adapter (options, seam table, placement); see [`web/src/fs/titan.js`](web/src/fs/titan.js) for a lower-body design and [`web/src/fs/hugo.js`](web/src/fs/hugo.js) for a top. Designs without one are cut generically ([`web/src/fs/generic.js`](web/src/fs/generic.js)). After upgrading `@freesewing/*`, run `node web/tools/gen_fs_catalog.mjs` to regenerate the catalogue, option lists and thumbnails.
 
 **Body**
 * Enter GarmentCode's 26 body measurements (cm or inches). The pattern is re-drafted to fit, and the mannequin morphs to match: height, landmark lines, bust/underbust/waist/hip girths, shoulders, arms and thighs, blended with GarmentCode's body segmentation.
@@ -64,7 +65,7 @@ Deployment happens through [`.github/workflows/pages.yml`](.github/workflows/pag
 
 ### What's changed vs. upstream
 
-Only additions: `web/`, `.github/workflows/pages.yml`, `.gitignore` entries and this README section. The Python library and garment programs are untouched. The web port is distributed under the same MIT license as the original project. FreeSewing designs are MIT licensed by their authors (https://freesewing.eu); the bundle keeps their license notices.
+Additions: `web/`, `.github/workflows/pages.yml`, `.gitignore` entries and this README section. One fix in the Python library: `Interface.reverse()` in `pygarment/garmentcode/interface.py` now also reverses the order of multi-section seam lengths (it made the hoodie's right hem band sewn on backwards). The garment programs are untouched. The web port is distributed under the same MIT license as the original project. FreeSewing designs are MIT licensed by their authors (https://freesewing.eu); the bundle keeps their license notices.
 
 ---
 
