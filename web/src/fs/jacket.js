@@ -105,10 +105,14 @@ export function shoulderLine(part, e) {
  *  side:  { part, lo(y), hi(y) } or null
  *  back:  { part, cb(y), hi(y), shoulder (edge) }
  *  armhole: [x, y] of the armhole bottom, in the side panel's (or the front's) coordinates
+ *  skirt: { front, back } (optional, long coats): pattern heights (each piece's own) below
+ *    which the pieces hang as a cone from that level (the torso maps are made for the torso:
+ *    below the seat they would pleat the extra girth into depth): the ring at that height,
+ *    scaled about the body's axis by the garment's girth there.
  * Returns { front, side, back }: (x, y, sg) in each piece's FreeSewing (unmirrored) coordinates -> 3D,
  * on the wearer's left for the front and side (sg = 1) or right (sg = -1), the back the other way round.
  */
-export function jacketTorso(F, { front, side = null, back, armhole, gap = 1.5 }) {
+export function jacketTorso(F, { front, side = null, back, armhole, gap = 1.5, skirt = null }) {
   const wf = (y) => front.hi(y) - front.cx;
   const ws = (y) => (side ? Math.max(0, side.hi(y) - side.lo(y)) : 0);
   const wb = (y) => back.hi(y) - back.cb(y);
@@ -118,10 +122,17 @@ export function jacketTorso(F, { front, side = null, back, armhole, gap = 1.5 })
   const [nf, sf] = shoulderLine(front.part, front.shoulder), [nb, sb] = shoulderLine(back.part, back.shoulder);
   const slope = (n, s) => Math.max(0, (n[1] - s[1]) / Math.max(1, s[0] - n[0]));
   const cbN = back.cb(nb[1]), cbS = back.cb(sb[1]);
-  const Tf = torsoMap(F, { side: 1, xSign: 1, hps: [nf[0] - front.cx, nf[1]], slope: slope(nf, sf), shoulderX: sf[0] - front.cx,
+  const Tf0 = torsoMap(F, { side: 1, xSign: 1, hps: [nf[0] - front.cx, nf[1]], slope: slope(nf, sf), shoulderX: sf[0] - front.cx,
     armholeX: uArm, girth, armholeY, gap });
-  const Tb = torsoMap(F, { side: -1, xSign: -1, hps: [nb[0] - cbN, nb[1]], slope: slope(nb, sb), shoulderX: sb[0] - cbS,
+  const Tb0 = torsoMap(F, { side: -1, xSign: -1, hps: [nb[0] - cbN, nb[1]], slope: slope(nb, sb), shoulderX: sb[0] - cbS,
     armholeX: girth(armholeY) - uArm, girth, armholeY, gap });
+  const cone = (T, yS) => (u, y) => {
+    if (yS == null || y >= yS) return T(u, y);
+    const g0 = Math.max(1, girth(yS)), g = Math.max(1, girth(y)), s = Math.max(0.95, g / g0);
+    const Q = T(u * g0 / g, yS), S = F.sec(Q[1]);
+    return [S.xc + (Q[0] - S.xc) * s, Q[1] - (yS - y), S.zc + (Q[2] - S.zc) * s];
+  };
+  const Tf = cone(Tf0, skirt?.front), Tb = cone(Tb0, skirt?.back);
   return {
     girth,
     front: (x, y, sg = 1) => Tf(sg * (x - front.cx), y),

@@ -27,34 +27,34 @@ export function edgeEndingAt(part, pt) {
 
 /**
  * Seam-path edges of a two-part sleeve, found by the points they end at (the parts that
- * add vents or cuffs to it keep these points):
+ * add vents or cuffs to it keep these points), whichever point the outline starts at:
  *  top: back seam (wrist -> elbowRight -> tsRightEdge -> backPitchPoint), cap (-> top,
- *    -> frontPitchPoint, -> tsLeftEdge), front seam (-> tsElbowLeft -> tsWristLeft), wrist;
+ *    -> frontPitchPoint, -> tsLeftEdge), front seam (-> tsElbowLeft -> tsWristLeft);
  *  under: back seam (wrist -> elbowRight -> usRightEdge -> usTip), cap (-> usLeftEdgeRight
- *    -> usLeftEdge), front seam (-> usElbowLeft -> usWristLeft), wrist.
- * Edges between two named points are included in the run they belong to (a vent's
- * extension below ventSlopeStart is not: see finishSleeve).
+ *    -> usLeftEdge), front seam (-> usElbowLeft -> usWristLeft).
+ * The back seam starts at the wrist, or at the top of a vent (ventSlopeStart: Jaeger); the
+ * wrist, a vent's extension or a cuff (Carlton) are not part of any seam.
  */
 export function sleeveEdges(ts, us) {
-  const run = (part, from, names) => {
+  const run = (part, starts, names) => {
+    const pe = pathEdges(part.paths.seam), n = pe.length;
+    let k = -1;
+    for (const nm of starts) { const j = edgeEndingAt(part, part.points[nm]); if (j >= 0) { k = j; break; } }
+    if (k < 0) throw new Error(`${part.name}: no seam edge ends at ${starts.join(' or ')}`);
     const out = [];
-    let k = from;
     for (const nm of names) {
       const j = edgeEndingAt(part, part.points[nm]);
-      if (j < 0 || j < k) throw new Error(`${part.name}: no seam edge ends at ${nm}`);
+      if (j < 0) throw new Error(`${part.name}: no seam edge ends at ${nm}`);
       const r = [];
-      for (let i = k; i <= j; i++) r.push(i);
+      for (let i = (k + 1) % n, c = 0; c < n; i = (i + 1) % n, c++) { if (pe[i]) r.push(i); if (i === j) break; }
       out.push(r);
-      k = j + 1;
+      k = j;
     }
     return out;
   };
-  // the back seam starts at the wrist, or above a vent (Jaeger: the vent's extension runs
-  // from the wrist to ventSlopeStart and is left unsewn)
-  const startOf = (part) => { const j = edgeEndingAt(part, part.points.ventSlopeStart); return j < 0 ? 0 : j + 1; };
-  const [tb1, tb2, tb3, tc1, tc2, tc3, tf1, tf2] = run(ts, startOf(ts),
+  const [tb1, tb2, tb3, tc1, tc2, tc3, tf1, tf2] = run(ts, ['ventSlopeStart', 'tsWristRight'],
     ['elbowRight', 'tsRightEdge', 'backPitchPoint', 'top', 'frontPitchPoint', 'tsLeftEdge', 'tsElbowLeft', 'tsWristLeft']);
-  const [ub1, ub2, ub3, uc1, uc2, uf1, uf2] = run(us, startOf(us),
+  const [ub1, ub2, ub3, uc1, uc2, uf1, uf2] = run(us, ['ventSlopeStart', 'usWristRight'],
     ['elbowRight', 'usRightEdge', 'usTip', 'usLeftEdgeRight', 'usLeftEdge', 'usElbowLeft', 'usWristLeft']);
   return {
     top: { back: [...tb1, ...tb2, ...tb3], capBack: tc1, capTop: tc2, capFront: tc3, front: [...tf1, ...tf2] },
@@ -146,9 +146,11 @@ const near = (a, b) => a && b && Math.abs(a.x - b.x) < 0.01 && Math.abs(a.y - b.
 export function finishSleeve(part, kind) {
   const p = part.points, wr = p[kind + 'WristRight'], wl = p[kind + 'WristLeft'];
   if (!wr || !wl || !p.elbowRight) return;
-  const ops = part.paths.seam.ops;
-  const a = ops.findIndex(op => near(op.to, p.elbowRight));
-  const b = ops.findIndex((op, i) => i > a && near(op.to, wl));
+  const ops = part.paths.seam.ops.filter(op => op.type !== 'move' && op.type !== 'close'), n = ops.length;
+  const a = ops.findIndex(op => near(op.to, p.elbowRight)), b = ops.findIndex(op => near(op.to, wl));
   if (a < 0 || b < 0) return;
-  part.paths.seam.ops = [{ type: 'move', to: wr }, { type: 'line', to: p.elbowRight }, ...ops.slice(a + 1, b + 1), { type: 'line', to: wr }];
+  const out = [{ type: 'move', to: wr }, { type: 'line', to: p.elbowRight }];
+  for (let i = (a + 1) % n; ; i = (i + 1) % n) { out.push(ops[i]); if (i === b) break; }
+  out.push({ type: 'line', to: wr });
+  part.paths.seam.ops = out;
 }
