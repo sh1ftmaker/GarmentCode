@@ -1,5 +1,5 @@
-// FreeSewing "Bella" body block (https://freesewing.eu/designs/bella/, MIT, design by Joost
-// De Cock): the close-fitting womenswear block Bee, Noble and others are drafted from, with
+// FreeSewing "Bella" body block (https://freesewing.eu/designs/bella/, MIT, design by Bella
+// Incognito and Joost De Cock): the close-fitting womenswear block Bee, Noble and others are drafted from, with
 // a side bust dart and a waist dart in the front, a waist dart and a centre back seam in the
 // back, and an optional set-in sleeve. Measurements from the mannequin, options as sliders,
 // seam table and placement around the torso and arms for the drape.
