@@ -648,6 +648,28 @@ export function buildGarment(pattern, h, sdf, { armAxes = null, lift = pattern.l
     }
   }
 
+  // Outline samples no triangle uses (e.g. on a sliver edge a few mm long) would fall freely
+  // and drag a seam line to the floor: tie each to the nearest used outline samples on both sides.
+  const used = new Uint8Array(nv);
+  for (const v of index) used[v] = 1;
+  for (const q of panels) {
+    const n = q.p.boundary.length;
+    for (let i = 0; i < n; i++) {
+      const v = remap[q.base + i];
+      if (used[v]) continue;
+      for (const dir of [-1, 1]) {
+        for (let k = 1; k < n; k++) {
+          const j = ((i + dir * k) % n + n) % n, w = remap[q.base + j];
+          if (!used[w] || w === v) continue;
+          const pa = q.pts[i], pb = q.pts[j];
+          stretch.push(v, w); stretchRest.push(Math.hypot(pb[0] - pa[0], pb[1] - pa[1]));
+          stretchWarp.push(edgeWarp(q.gv, pb[0] - pa[0], pb[1] - pa[1]) + (q.rib ? 2 : 0));
+          break;
+        }
+      }
+    }
+  }
+
   // seam lines for rendering: panel boundary edges whose both ends are shared (sewn) vertices
   const seamLines = [];
   for (const q of panels) {
