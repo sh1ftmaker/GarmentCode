@@ -33,29 +33,32 @@ export function edgeEndingAt(part, pt) {
  *  under: back seam (wrist -> elbowRight -> usRightEdge -> usTip), cap (-> usLeftEdgeRight
  *    -> usLeftEdge), front seam (-> usElbowLeft -> usWristLeft).
  * The back seam starts at the wrist, or at the top of a vent (ventSlopeStart: Jaeger); the
- * wrist, a vent's extension or a cuff (Carlton) are not part of any seam.
+ * wrist, a vent's extension or a cuff (Carlton) are not part of any seam; Devon's sleeves end
+ * at their cuff seam (tsCuffRight / tsCuffLeft).
  */
 export function sleeveEdges(ts, us) {
   const run = (part, starts, names) => {
     const pe = pathEdges(part.paths.seam), n = pe.length;
+    // edges the outline really has (pieceLoop drops empty closes and zero-length lines)
+    const real = (p) => p && (p.length > 2 || Math.hypot(p[0][0] - p[1][0], p[0][1] - p[1][1]) > 1e-3);
     let k = -1;
     for (const nm of starts) { const j = edgeEndingAt(part, part.points[nm]); if (j >= 0) { k = j; break; } }
     if (k < 0) throw new Error(`${part.name}: no seam edge ends at ${starts.join(' or ')}`);
     const out = [];
     for (const nm of names) {
-      const j = edgeEndingAt(part, part.points[nm]);
+      const j = nm.split('|').map(a => edgeEndingAt(part, part.points[a])).find(i => i >= 0) ?? -1;
       if (j < 0) throw new Error(`${part.name}: no seam edge ends at ${nm}`);
       const r = [];
-      for (let i = (k + 1) % n, c = 0; c < n; i = (i + 1) % n, c++) { if (pe[i]) r.push(i); if (i === j) break; }
+      for (let i = (k + 1) % n, c = 0; c < n; i = (i + 1) % n, c++) { if (real(pe[i])) r.push(i); if (i === j) break; }
       out.push(r);
       k = j;
     }
     return out;
   };
-  const [tb1, tb2, tb3, tc1, tc2, tc3, tf1, tf2] = run(ts, ['ventSlopeStart', 'tsWristRight'],
-    ['elbowRight', 'tsRightEdge', 'backPitchPoint', 'top', 'frontPitchPoint', 'tsLeftEdge', 'tsElbowLeft', 'tsWristLeft']);
-  const [ub1, ub2, ub3, uc1, uc2, uf1, uf2] = run(us, ['ventSlopeStart', 'usWristRight'],
-    ['elbowRight', 'usRightEdge', 'usTip', 'usLeftEdgeRight', 'usLeftEdge', 'usElbowLeft', 'usWristLeft']);
+  const [tb1, tb2, tb3, tc1, tc2, tc3, tf1, tf2] = run(ts, ['ventSlopeStart', 'tsWristRight', 'tsCuffRight'],
+    ['elbowRight', 'tsRightEdge', 'backPitchPoint', 'top', 'frontPitchPoint', 'tsLeftEdge', 'tsElbowLeft', 'tsWristLeft|tsCuffLeft']);
+  const [ub1, ub2, ub3, uc1, uc2, uf1, uf2] = run(us, ['ventSlopeStart', 'usWristRight', 'usCuffRight'],
+    ['elbowRight', 'usRightEdge', 'usTip', 'usLeftEdgeRight', 'usLeftEdge', 'usElbowLeft', 'usWristLeft|usCuffLeft']);
   return {
     top: { back: [...tb1, ...tb2, ...tb3], capBack: tc1, capTop: tc2, capFront: tc3, front: [...tf1, ...tf2] },
     under: { back: [...ub1, ...ub2, ...ub3], cap: [...uc1, ...uc2], front: [...uf1, ...uf2] },
