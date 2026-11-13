@@ -9,7 +9,7 @@
 // were already sewn; the sleeves start as tubes around the arms and are snapped onto the
 // armholes (follow), as Brian's.
 import { upperFrame, outlineSpan, sleeveMap } from './place.js';
-import { pieceLoop } from './convert.js';
+import { pieceLoop, pathEdges } from './convert.js';
 import { treeOptions } from './tops.js';
 import { fsMeasurements, pick } from './measure.js';
 import { edgesOf, sewnFlat, dartedTorso, polysOf, range, P } from './bodice.js';
@@ -61,10 +61,19 @@ export const measurements = (m, body) => pick(fsMeasurements(m, body), MEASUREME
  * Edge lists run in drawing order.
  */
 export function frontEdges(part) {
-  const E = edgesOf(part, ['waistDartTip', 'bustDartTip', 'armhole', 'armholePitch', 'shoulder', 'hps', 'cfNeck'], ['waistDartTip']);
+  const E = edgesOf(part, ['waistDartTip', 'bustDartTip', 'armhole', 'armholePitch', 'shoulder', 'hps', 'cfNeck'], ['waistDartTip', 'bustDartTip']);
+  const ed = pathEdges(part.paths.seam);
+  // the bust dart's tip is not always at the point of that name (Bee's Bella, for one, aims
+  // it at the bust point): then it is the edge two before the armhole, ending well inside
+  let bt = E.bustDartTip;
+  if (bt == null) {
+    bt = E.armhole - 2;
+    const tip = ed[bt]?.at(-1), side = ed[bt + 1]?.at(-1);
+    if (!tip || !side || side[0] - tip[0] < 5) throw new Error(`${part.name}: no bust dart found`);
+  }
   return {
-    wd: E.waistDartTip != null ? [E.waistDartTip, E.waistDartTip + 1] : null,
-    sideLow: [E.bustDartTip - 1], bd: [E.bustDartTip, E.bustDartTip + 1], sideHigh: range(E.bustDartTip + 2, E.armhole),
+    wd: E.waistDartTip != null ? [E.waistDartTip, E.waistDartTip + 1] : null, apex: ed[bt].at(-1),
+    sideLow: [bt - 1], bd: [bt, bt + 1], sideHigh: range(bt + 2, E.armhole),
     armhole: range(E.armhole + 1, E.shoulder), shoulder: E.hps, neck: E.cfNeck, fold: E.cfNeck + 1,
   };
 }
@@ -133,7 +142,7 @@ export function bodiceFlats(fp, bp) {
   const Ef = frontEdges(fp), Eb = backEdges(bp);
   const front = sewnFlat({
     vdarts: Ef.wd ? [[polysOf(fp, [Ef.wd[0]]), polysOf(fp, [Ef.wd[1]])]] : [],
-    hdarts: [{ lower: polysOf(fp, [Ef.bd[0]]), upper: polysOf(fp, [Ef.bd[1]]), apex: P(fp.points.bustDartTip), top: P(fp.points.shoulder)[1] }],
+    hdarts: [{ lower: polysOf(fp, [Ef.bd[0]]), upper: polysOf(fp, [Ef.bd[1]]), apex: Ef.apex, top: P(fp.points.shoulder)[1] }],
   });
   const back = sewnFlat({ vdarts: Eb.wd ? [[polysOf(bp, [Eb.wd[0]]), polysOf(bp, [Eb.wd[1]])]] : [] });
   return { front, back };
@@ -143,7 +152,8 @@ export function bodiceTorso(F, fp, bp) {
   const fl = bodiceFlats(fp, bp);
   const side = (part, flat) => ({ pieces: [{ part, flat }], ...Object.fromEntries(['hps', 'shoulder', 'armhole'].map(k => [k, flat(...P(part.points[k]))])) });
   const T = dartedTorso(F, side(fp, fl.front), side(bp, fl.back));
-  return { front: T.front(fl.front), back: T.back(fl.back) };
+  // frontWith / backWith: the same torso for pieces drawn on the block with their own flat transform
+  return { front: T.front(fl.front), back: T.back(fl.back), frontWith: T.front, backWith: T.back };
 }
 
 /** Sleeve maps (left = unmirrored, right = mirrored) for Bella's sleeve (local +x = front). */
