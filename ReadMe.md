@@ -11,7 +11,17 @@ This fork adds **GarmentCode 3D Studio**, a static, browser-only web app (in [`w
 **Design**
 * The original GarmentCode Python (`pygarment` + `assets/garment_programs`) runs unchanged in [Pyodide](https://pyodide.org/) inside a Web Worker.
 * A design gallery (categories, search, GarmentCode / FreeSewing and 3D filters, recently used designs), plain-language parameter names, an Essentials/All switch, search, and "Surprise me" randomisation with per-parameter locks.
-* Undo/redo, share links (the design is compressed into the URL), saved designs with thumbnails, and autosave, all stored in your browser.
+* **Sketchbook**: a step-by-step mix-and-match builder for GarmentCode designs (top, neckline, collar or hood, sleeves, cuffs, waistband, bottom, extras), each choice a card with a small drawing; the full parameter list stays below it to fine-tune.
+* **My designs**: a library of saved designs with thumbnails (in the gallery), with rename, duplicate, delete, and import/export as `.gcdesign.json` files. Undo/redo, share links (the design is compressed into the URL) and autosave. Everything is stored in your browser.
+
+**Draft: your own patterns** ([`web/src/workshop/`](web/src/workshop/))
+* A pattern editor on a cutting mat, drawn over the mannequin seen from the front or the back, in real centimetres and in GarmentCode's body frame, so pieces are drawn where they sit on the body.
+* Draw pieces point by point; drag points, edges (to curve them) and whole pieces; add and delete points; straight, curved and S-shaped edges.
+* Any point can follow the body: type a formula like `waist / 4 + ease` using the body measurements, landmark heights (`waist_y`, `hip_y`, `shoulder_y`, ...) and the pattern's own numbers. Points drawn with the mouse are graded from the body they were drawn on (landmark heights and girths), so they follow measurement changes too.
+* Mirrored left/right pairs, pieces cut on the fold, single pieces and cut-only pieces (pockets, facings); grain direction and rib knit per piece; edges that hold the garment at the waist, under the arms or at the neck.
+* The Sew tool joins edges (also several edges in a row, and a piece to its own mirror copy); seams are numbered and checked for length.
+* Start from a measurement-driven block (A-line skirt, boxy T-shirt, shift dress), a blank board, or a copy of the current GarmentCode design.
+* Your pattern drapes live beside the board, and gets the same cutting layout, PDF/SVG/DXF exports, undo, share links and saving as every other design. Pattern files download as `.pattern.json`.
 
 **FreeSewing designs**
 * Besides GarmentCode's programs, the app includes the whole [FreeSewing](https://freesewing.eu) collection (MIT, by Joost De Cock and contributors): 72 designs by Joost De Cock and many other designers, each credited in the app's gallery. Every design drafts from your measurements and gets its pattern, a cutting layout (per material: fabric, lining, interfacing, ribbing) and the exports.
@@ -51,7 +61,7 @@ It installs as an app (PWA) and caches itself for offline use after the first vi
 
 ### Limitations
 
-The drape is a lightweight real-time approximation, **not** the NVIDIA Warp simulator used by GarmentCode/GarmentCodeData. There is no cloth self-collision (layered pieces can overlap), and fabric behaviour is simplified. Some designs, especially strapless and close-fitting tops, may settle lower than intended. The mannequin morph is an approximate regional deformation, not a statistical body model. Extreme measurements will look stylised, and the morph doesn't model posture or body shape beyond the listed measurements. Use the original pipeline for research-quality results.
+The drape is a lightweight real-time approximation, **not** the NVIDIA Warp simulator used by GarmentCode/GarmentCodeData. Cloth self-collision is approximate (layered pieces can still overlap), and fabric behaviour is simplified. Patterns drawn in Draft drape with the same simulator: pieces are wrapped around the body or arm from where they are drawn, so very unusual shapes may need a few tries. Some designs, especially strapless and close-fitting tops, may settle lower than intended. The mannequin morph is an approximate regional deformation, not a statistical body model. Extreme measurements will look stylised, and the morph doesn't model posture or body shape beyond the listed measurements. Use the original pipeline for research-quality results.
 
 ### Run locally
 

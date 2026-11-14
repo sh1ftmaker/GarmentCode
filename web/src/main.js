@@ -560,7 +560,7 @@ function pushRecent(key) { prefs.set({ recent: [key, ...recentKeys().filter(k =>
 async function selectGC(t) {
   if (!defaults.design) return;
   cut.material = null;
-  S.template = t.id; S.source = null; S.custom = null;
+  S.template = t.id; S.source = null; S.custom = null; workshop?.setDesign(null);
   await py('setDesign', { design: applyTemplate(defaults.design, t) });
   S.design = await py('design');
   pushRecent(t.id);
@@ -571,7 +571,7 @@ async function selectGC(t) {
 async function selectFS(id) {
   cut.material = null;
   try { await ensureFS(id); } catch (e) { warn(e.message); return; }
-  S.source = id; S.template = `fs:${id}`; S.custom = null;
+  S.source = id; S.template = `fs:${id}`; S.custom = null; workshop?.setDesign(null);
   S.design = fsDefaults(id);
   pushRecent(`fs:${id}`);
   renderDesignUI(); renderTemplates();
