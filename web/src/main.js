@@ -12,7 +12,9 @@ import { autoLayout, layoutLength, findProblems, regions, fabricToBuy } from './
 import { primitives, fabricPrims, toSVG, layoutPDF, patternPDF, planSheet, PAPERS, toDXF, yardText } from './export.js';
 import { ADAPTERS, fsInfo, fsList, ensureFS, fsDefaults, isFS, fsPattern, fsSVG, fsSettings, fsRandomize } from './fs/index.js';
 import { armAxes as computeArmAxes } from './fs/place.js';   // arm axes, for wrapping sleeves
-import { History, compactSnapshot, expandSnapshot, encodeShare, decodeShare, saves, profiles, lastState, prefs } from './state.js';
+import { History, compactSnapshot, expandSnapshot, encodeShare, decodeShare, profiles, lastState, prefs } from './state.js';
+import { initMixer, renderMixer, outfitSummary } from './mixer.js';
+import * as library from './library.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -257,6 +259,7 @@ function syncUndoButtons() {
 function commitHistory() {
   if (undoStack.push(snapshot())) lastState.set(compactSnapshot(snapshot(), defaults));
   syncUndoButtons();
+  library.decorateCard();
 }
 async function applySnapshot(snap, { record = true } = {}) {
   await loadBase(snap.base || 'neutral');
@@ -371,6 +374,7 @@ function renderDesignUI() {
   $('#export-menu [data-x="svg"]').textContent = S.source ? 'FreeSewing pattern SVG' : 'GarmentCode pattern SVG';
   $('#export-menu [data-x="spec"]').textContent = S.source ? 'FreeSewing settings JSON' : 'Pattern specification JSON';
   $('#export-menu [data-x="design"]').hidden = !!S.source;
+  renderMixer();
   if (S.source) return renderFSDesignUI(root);
   const d = S.design, meta = d.meta;
   const g = grainControl(meta);
@@ -466,6 +470,16 @@ async function commitParam(path, value) {
   commitHistory();
   regenerate();
 }
+/** Several GarmentCode parameters as one step (the Sketchbook's choices): pairs of [path, value]. */
+async function commitParams(pairs) {
+  if (S.source) return;
+  try { for (const [path, value] of pairs) await py('setParam', { path, value }); } catch (e) { warn(e.message); return; }
+  S.design = await py('design');
+  S.template = null;
+  renderDesignUI();
+  commitHistory();
+  regenerate();
+}
 
 // ---------------------------------------------------------------- design picker
 // GarmentCode templates (drafted by GarmentCode in Pyodide) and every FreeSewing design:
@@ -534,7 +548,7 @@ async function selectFS(id) {
   // no drape: the pattern is the picture (on wide screens, where it fits beside the mannequin)
   if (!ADAPTERS[id] && $('#pattern-card').hidden && matchMedia('(min-width: 821px)').matches) $('#btn-pattern').click();
 }
-const selectDesign = (key) => (key.startsWith('fs:') ? selectFS(key.slice(3)) : selectGC(TEMPLATES.find(t => t.id === key) || TEMPLATES[0]));
+const selectDesign = (key) => (library.detach(), key.startsWith('fs:') ? selectFS(key.slice(3)) : selectGC(TEMPLATES.find(t => t.id === key) || TEMPLATES[0]));
 
 /** The current-design card and the recent row. */
 function renderTemplates() {
@@ -546,7 +560,8 @@ function renderTemplates() {
     ? `${d.src === 'gc' ? 'GarmentCode' : `FreeSewing · ${esc(d.by)}`} <span class="pill ${d.drape ? 'drape' : 'flat'}">${d.drape ? '3D' : 'Pattern'}</span>`
     : 'GarmentCode · edited';
   $('#cd-desc').textContent = d ? (d.description || '') : 'Your own combination of GarmentCode parameters.';
-  if (d && !d.icon) ensureThumbs().then(() => { if ((S.source ? `fs:${S.source}` : S.template) === key) $('#cd-thumb').innerHTML = thumbSVG(d, 56); });
+  if (d && !d.icon) ensureThumbs().then(() => { if ((S.source ? `fs:${S.source}` : S.template) === key && !library.current()) $('#cd-thumb').innerHTML = thumbSVG(d, 56); });
+  library.decorateCard();
   const root = $('#templates');
   root.innerHTML = '';
   let keys = recentKeys();
@@ -566,8 +581,10 @@ function renderTemplates() {
 }
 
 const gal = { kind: 'All', src: 'all', drapeOnly: false, q: '' };
-async function openGallery() {
+const MINE = 'My designs';
+async function openGallery(kind) {
   try { const g = prefs.get().gallery; if (g) Object.assign(gal, { kind: g.kind || 'All', src: g.src || 'all', drapeOnly: !!g.drapeOnly }); } catch { /* defaults */ }
+  if (typeof kind === 'string') { gal.kind = kind; if (kind === MINE) gal.src = 'all'; }
   gal.q = '';
   $('#gal-search').value = '';
   $('#gal-3d').checked = gal.drapeOnly;
@@ -578,6 +595,10 @@ async function openGallery() {
   await ensureThumbs();
   renderGallery();
   $('#gal-body .gcard.active')?.scrollIntoView({ block: 'center' });
+}
+async function openSaved(e) {
+  $('#dlg-gallery').close();
+  try { await library.open(e.id); toast(`Opened “${e.name}”`); } catch (err) { console.error(err); warn(`Could not open “${e.name}”: ${err.message}`); }
 }
 function galleryMatches() {
   const q = gal.q.trim().toLowerCase();
@@ -597,19 +618,28 @@ function renderGallery() {
   const counts = {};
   for (const d of list) counts[d.kind] = (counts[d.kind] || 0) + 1;
   const kinds = KIND_ORDER.filter(k => counts[k]);
-  if (gal.kind !== 'All' && !counts[gal.kind]) gal.kind = 'All';
+  const mine = library.matches(gal.q, gal.src);
+  counts[MINE] = mine.length;
+  if (gal.kind !== 'All' && gal.kind !== MINE && !counts[gal.kind]) gal.kind = 'All';
   const chips = $('#gal-kinds');
   chips.innerHTML = '';
-  for (const k of ['All', ...kinds]) {
-    const c = el('button', { class: 'chip' + (gal.kind === k ? ' on' : ''), role: 'tab', 'aria-selected': String(gal.kind === k) }, k, el('small', {}, String(k === 'All' ? list.length : counts[k])));
+  for (const k of ['All', MINE, ...kinds]) {
+    const c = el('button', { class: 'chip' + (gal.kind === k ? ' on' : '') + (k === MINE ? ' mine-chip' : ''), role: 'tab', 'aria-selected': String(gal.kind === k) }, k, el('small', {}, String(k === 'All' ? list.length + mine.length : counts[k])));
     c.onclick = () => { gal.kind = k; saveGal(); renderGallery(); $('#gal-body').scrollTop = 0; };
     chips.append(c);
   }
-  const shown = gal.kind === 'All' ? list : list.filter(d => d.kind === gal.kind);
-  $('#gal-count').textContent = `${shown.length} design${shown.length === 1 ? '' : 's'} · ${shown.filter(d => d.drape).length} in 3D`;
   const body = $('#gal-body');
   body.innerHTML = '';
-  if (!shown.length) { body.append(el('div', { class: 'gal-empty' }, 'No designs match. Try another search or clear the filters.')); return; }
+  const mineOpts = { onOpen: openSaved, rerender: () => { const top = body.scrollTop; renderGallery(); body.scrollTop = top; } };
+  if (gal.kind === MINE) {
+    $('#gal-count').textContent = `${mine.length} saved design${mine.length === 1 ? '' : 's'}`;
+    library.renderGallerySection(body, mine, { ...mineOpts, full: true });
+    return;
+  }
+  const shown = gal.kind === 'All' ? list : list.filter(d => d.kind === gal.kind);
+  $('#gal-count').textContent = `${shown.length} design${shown.length === 1 ? '' : 's'} · ${shown.filter(d => d.drape).length} in 3D`;
+  if (gal.kind === 'All' && mine.length) library.renderGallerySection(body, mine, mineOpts);
+  if (!shown.length && !(gal.kind === 'All' && mine.length)) { body.append(el('div', { class: 'gal-empty' }, 'No designs match. Try another search or clear the filters.')); return; }
   for (const k of KIND_ORDER) {
     const ds = shown.filter(d => d.kind === k)
       .sort((a, b) => (b.drape - a.drape) || (a.src === b.src ? 0 : a.src === 'gc' ? -1 : 1) || a.name.localeCompare(b.name));
@@ -630,7 +660,7 @@ function renderGallery() {
 function saveGal() { prefs.set({ gallery: { kind: gal.kind, src: gal.src, drapeOnly: gal.drapeOnly } }); }
 $('#btn-browse').onclick = openGallery;
 $('#gal-search').oninput = (e) => { gal.q = e.target.value; renderGallery(); };
-$('#gal-search').onkeydown = (e) => { if (e.key === 'Enter') { const first = $('#gal-body .gcard'); if (first) first.click(); } };
+$('#gal-search').onkeydown = (e) => { if (e.key === 'Enter') { const first = $('#gal-body .gcard'); if (first) (first.querySelector('.mine-open') || first).click(); } };
 $('#gal-3d').onchange = (e) => { gal.drapeOnly = e.target.checked; saveGal(); renderGallery(); };
 $$('#gal-source .seg-btn').forEach(b => { b.onclick = () => { gal.src = b.dataset.src; $$('#gal-source .seg-btn').forEach(x => x.classList.toggle('active', x === b)); saveGal(); renderGallery(); }; });
 
@@ -1056,6 +1086,7 @@ $('#file-input').onchange = async (e) => {
   if (!f) return;
   try {
     const text = await f.text();
+    if (/\.json$/i.test(f.name) && library.importText(text, f.name, { openIt: true }) !== null) { e.target.value = ''; return; }   // .gcdesign.json
     if (/^\s*body\s*:/m.test(text) && !/^\s*design\s*:/m.test(text)) {
       const params = {};
       for (const line of text.split('\n')) { const m = line.match(/^\s+([a-z_]+):\s*([-0-9.eE]+)\s*$/); if (m) params[m[1]] = +m[2]; }
@@ -1128,27 +1159,8 @@ async function share() {
 }
 $('#btn-share').onclick = share;
 
-// saves dialog
-function renderSaves() {
-  const list = $('#saves-list');
-  list.innerHTML = '';
-  const items = saves.list();
-  if (!items.length) list.append(el('div', { class: 'empty' }, 'No saved designs yet. They stay in this browser.'));
-  for (const s of items) {
-    const img = el('img', { src: s.thumb || '', alt: s.name, title: 'Open' });
-    img.onclick = async () => { $('#dlg-saves').close(); if (isFS(s.state.s)) await ensureFS(s.state.s); await applySnapshot(expandSnapshot(s.state, defaults)); toast(`Opened “${s.name}”`); };
-    const del = el('button', { class: 'icon-btn', title: 'Delete', 'aria-label': `Delete ${s.name}` }, '🗑');
-    del.onclick = () => { saves.remove(s.id); renderSaves(); };
-    list.append(el('div', { class: 'save' }, img, el('div', { class: 'meta' }, el('div', {}, s.name, el('small', {}, new Date(s.ts).toLocaleDateString())), del)));
-  }
-}
-$('#btn-saves').onclick = () => { renderSaves(); $('#save-name').value = ''; $('#dlg-saves').showModal(); };
-$('#btn-save').onclick = () => {
-  const name = $('#save-name').value.trim() || `Design ${new Date().toLocaleString()}`;
-  const ok = saves.add({ id: Math.random().toString(36).slice(2), name, ts: Date.now(), thumb: viewer.thumbnail(), state: compactSnapshot(snapshot(), defaults) });
-  renderSaves();
-  toast(ok ? `Saved “${name}”` : 'Could not save: browser storage is unavailable.');
-};
+// My designs (library.js): saved designs live in the gallery's "My designs" category
+$('#btn-saves').onclick = () => openGallery(MINE);
 $$('dialog [data-close]').forEach(b => { b.onclick = () => b.closest('dialog').close(); });
 $('#btn-about').onclick = () => $('#dlg-about').showModal();
 $('#brand').onclick = (e) => { e.preventDefault(); $('#dlg-about').showModal(); };
@@ -1255,6 +1267,19 @@ $('#export-menu').addEventListener('click', async (e) => {
   handle.addEventListener('pointercancel', stop);
 })();
 
+// ---------------------------------------------------------------- Sketchbook + My designs
+initMixer({ getState: () => S, commit: commitParams });
+const sourceName = (c) => (c?.s ? (isFS(c.s) ? fsInfo(c.s).name : c.s) : 'GarmentCode');
+library.initLibrary({
+  compact: () => compactSnapshot(snapshot(), defaults),
+  thumb: () => { if (!viewer.ok) return ''; viewer.renderer.render(viewer.scene, viewer.camera); return viewer.renderer.domElement; },   // transparent; library.js crops it
+  open: async (c) => { if (isFS(c.s)) await ensureFS(c.s); S.template = null; cut.material = null; await applySnapshot(expandSnapshot(c, defaults)); },
+  title: () => { const t = designTitle(); if (t !== 'Custom design' || !S.design?.meta) return t; const o = outfitSummary(S.design); return o.charAt(0).toUpperCase() + o.slice(1); },
+  refresh: () => renderTemplates(),
+  openGallery,
+  sourceName,
+});
+
 // ---------------------------------------------------------------- boot
 (async () => {
   const p = prefs.get();
@@ -1275,7 +1300,7 @@ $('#export-menu').addEventListener('click', async (e) => {
     if (!start && lastState.get()) { try { const c = lastState.get(); if (isFS(c.s)) await ensureFS(c.s); start = expandSnapshot(c, defaults); } catch { start = null; } }
     S.template = start ? null : 'tee';
     if (!start) start = { design: defaults.design, base: 'neutral', measurements: { ...defaults.presets.neutral }, fabric: null };
-    void fromShare;
+    if (fromShare || S.template === 'tee') library.detach();   // not what My designs last had open
     await applySnapshot(start);
   } catch (e) {
     console.error(e);
