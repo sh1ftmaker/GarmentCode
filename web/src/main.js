@@ -861,7 +861,7 @@ function renderLayout() {
   }
   for (let y = 10; y < len; y += 10) grid += `<line x1="0" y1="${y}" x2="${L.folded && split > 0 && y < split ? W / 2 : W}" y2="${y}" stroke="#000" stroke-opacity="${y % 50 ? .04 : .1}" stroke-width=".1"/>`;
   const fab = fabricPrims(set, L, { length: len });
-  svg.innerHTML = `<g class="fabric">${grid}${inner(fab)}</g>
+  svg.innerHTML = `<g class="fabric">${inner(fab)}${grid}</g>
     <text x="0" y="-1.4" font-size="1.8" fill="#8e877d" font-family="Inter, sans-serif">${W} cm (${Math.round(W / 2.54)}″) wide${L.folded ? ', folded lengthwise' : ''} · grain runs top to bottom</text>`;
   const problems = findProblems(set, L);
   const prims = primitives(set, L, { sewLines: $('#show-sewline').checked });
