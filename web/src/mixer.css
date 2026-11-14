@@ -1,0 +1,116 @@
+/* Sketchbook (mixer.js) and My designs (library.js). Uses the design tokens from style.css only. */
+
+/* ---------- Sketchbook ---------- */
+.mixer {
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2);
+  padding: 10px 12px 12px; margin: 0 0 14px;
+}
+.mx-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.mx-head h3 { margin: 0; font-family: var(--font-display); font-weight: 500; font-size: 17px; }
+.mx-sum { font-size: 12px; color: var(--ink-2); min-width: 0; flex: 1; }
+.mx-sum::first-letter { text-transform: uppercase; }
+
+.mx-steps {
+  display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; margin: 0 -12px 8px; padding: 0 12px 2px;
+  scroll-padding: 0 12px;
+}
+.mx-steps::-webkit-scrollbar { display: none; }
+.mx-step {
+  flex: none; display: grid; grid-template-columns: auto auto; grid-template-rows: auto auto; column-gap: 6px; align-items: center;
+  text-align: left; padding: 5px 10px 5px 6px; border-radius: var(--radius-sm); border: 1px solid transparent;
+  background: none; cursor: pointer; color: var(--ink-2); max-width: 140px;
+}
+.mx-step:hover { background: var(--surface-3); color: var(--ink); }
+.mx-step .mx-n {
+  grid-row: 1 / 3; width: 20px; height: 20px; border-radius: 999px; display: grid; place-items: center;
+  font-size: 11px; font-weight: 600; border: 1px dashed var(--line-strong); color: var(--ink-3);
+}
+.mx-step .mx-sn { font-size: 12.5px; font-weight: 600; }
+.mx-step small { font-size: 11px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.mx-step.on { background: var(--surface); border-color: var(--line); color: var(--ink); box-shadow: var(--shadow-sm); }
+.mx-step.on .mx-n { background: var(--accent); border: 1px solid var(--accent); color: var(--accent-ink); }
+
+.mx-body { min-height: 96px; }
+.mx-rowhead { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); margin: 4px 0 4px; }
+.mx-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 6px; margin-bottom: 6px; }
+.mx-card {
+  display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 7px 4px 6px; min-width: 0;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); cursor: pointer;
+  color: var(--ink-2); font-size: 11.5px; line-height: 1.2; text-align: center;
+  transition: border-color .15s, background .15s, transform .08s;
+}
+.mx-card svg { width: 44px; height: 44px; flex: none; }
+.mx-card svg path { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.mx-card span { color: var(--ink); overflow-wrap: anywhere; }
+.mx-card:hover { border-color: var(--line-strong); color: var(--ink); transform: translateY(-1px); }
+.mx-card.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.mx-card.on span { font-weight: 600; }
+.mx-row.small { grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); }
+.mx-row.small .mx-card { padding: 5px 3px 4px; font-size: 10.5px; }
+.mx-row.small .mx-card svg { width: 32px; height: 32px; }
+.mx-note { margin: 4px 0 2px; font-size: 12px; color: var(--ink-2); }
+.mx-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
+.mx-nav .btn { padding: 5px 11px; font-size: 13px; }
+
+.ft-head {
+  margin: 14px 0 -4px; padding-top: 2px; font-family: var(--font-display); font-weight: 500; font-size: 17px;
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+}
+.ft-head small { font-family: var(--font); font-size: 12px; font-weight: 400; }
+/* the fine-tune heading sits inside the mixer box visually after it */
+.mixer .ft-head { margin: 16px -12px -12px; padding: 12px 12px 10px; border-top: 1px solid var(--line); background: var(--surface); border-radius: 0 0 var(--radius) var(--radius); }
+
+/* ---------- current-design card: My designs row ---------- */
+.cd-lib { grid-column: 1 / -1; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: -2px; }
+.cd-lib .btn { padding: 5px 11px; font-size: 13px; }
+.cd-lib .btn svg, .mine-acts .btn svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.cd-lib .btn.accent { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.cd-name-form { display: flex; gap: 6px; flex: 1; min-width: 0; flex-wrap: wrap; }
+.cd-name-form input { flex: 1 1 160px; min-width: 0; }
+.current-design.mine { border-color: var(--accent); }
+.current-design.mine .cd-kicker { color: var(--accent); }
+.current-design .cd-thumb { position: relative; overflow: hidden; }
+.cd-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 20%; display: block; }
+
+/* ---------- gallery: My designs ---------- */
+.gal-kinds .chip.mine-chip:not(.on) { color: var(--accent); }
+.gal-sec.mine h4 { flex-wrap: wrap; }
+.mine-acts { margin-left: auto; display: inline-flex; gap: 2px; font-family: var(--font); }
+.btn.sm { padding: 4px 10px; font-size: 12.5px; }
+.gcard.mine { display: flex; flex-direction: column; padding: 0; text-align: left; }
+.gcard.mine:hover { transform: none; }
+.mine-open {
+  display: flex; flex-direction: column; width: 100%; padding: 0; border: 0; background: none; color: inherit;
+  text-align: left; cursor: pointer; font: inherit;
+}
+.gcard.mine .gthumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.gcard.mine .gthumb { overflow: hidden; }
+.mine-noimg { font-size: 28px; color: var(--ink-3); }
+.mine-acts-row { display: flex; justify-content: flex-end; gap: 0; padding: 0 4px 4px; margin-top: auto; }
+.icon-btn.sm { width: 30px; height: 30px; }
+.icon-btn.sm svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.icon-btn.danger:hover:not(:disabled) { color: var(--accent); }
+.mine-rename { margin: 0 8px 4px; width: calc(100% - 16px); padding: 4px 8px; font-size: 13px; }
+.mine-empty { grid-column: auto; }
+.mine-foot { margin: 10px 0 0; }
+
+/* ---------- toast with an action (works inside modal dialogs too) ---------- */
+.lib-toast {
+  position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 50;
+  display: flex; align-items: center; gap: 10px; max-width: min(520px, calc(100vw - 24px));
+  background: var(--ink); color: var(--surface); padding: 8px 8px 8px 14px; border-radius: var(--radius);
+  font-size: 13px; box-shadow: var(--shadow);
+}
+.lib-toast .btn { color: var(--surface); border-color: transparent; padding: 4px 10px; }
+.lib-toast .btn:hover { background: rgba(127, 127, 127, .25); }
+.lib-toast:not(:has(.btn)) { padding-right: 14px; }
+
+@media (max-width: 820px) {
+  .mixer { padding: 8px 10px 10px; }
+  .mx-steps { margin: 0 -10px 6px; padding: 0 10px 2px; }
+  .mx-row { grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)); gap: 5px; }
+  .mx-card { font-size: 11px; }
+  .mx-card svg { width: 38px; height: 38px; }
+  .mixer .ft-head { margin: 14px -10px -10px; padding: 10px; }
+  .lib-toast { bottom: 14px; }
+}

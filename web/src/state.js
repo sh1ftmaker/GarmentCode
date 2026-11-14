@@ -83,9 +83,13 @@ export async function decodeShare(s) {
 const KEY_SAVES = 'gc3d.saves.v1', KEY_PROFILES = 'gc3d.profiles.v1', KEY_LAST = 'gc3d.last.v1', KEY_PREFS = 'gc3d.prefs.v1';
 const read = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
 const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } };
+// Saved designs ("My designs", library.js). Entries keep the compact snapshot opaquely in `state`
+// (unknown fields such as `c` are never dropped). Thumbnails are small data URLs (~10 kB each).
+export const SAVES_MAX = 200;
 export const saves = {
   list: () => read(KEY_SAVES, []),
-  add(entry) { const l = saves.list(); l.unshift(entry); return write(KEY_SAVES, l.slice(0, 60)); },
+  setAll: (l) => write(KEY_SAVES, l.slice(0, SAVES_MAX)),
+  add(entry) { const l = saves.list(); l.unshift(entry); return write(KEY_SAVES, l.slice(0, SAVES_MAX)); },
   remove(id) { write(KEY_SAVES, saves.list().filter(e => e.id !== id)); },
 };
 export const profiles = {
