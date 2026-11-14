@@ -991,12 +991,14 @@ function setMode(mode) {
   S.mode = mode;
   $$('.mode').forEach(b => { const on = b.dataset.mode === mode; b.classList.toggle('active', on); b.setAttribute('aria-selected', String(on)); });
   $$('.page').forEach(p => p.classList.toggle('active', p.dataset.page === mode));
-  const isCut = mode === 'cut';
+  const isCut = mode === 'cut', isDraft = mode === 'draft';
   $('#layout-view').hidden = !isCut;
-  $('#three').style.visibility = isCut ? 'hidden' : 'visible';
-  $$('.no-webgl').forEach(n => { n.hidden = isCut; });
-  $('#viewbar').hidden = isCut;
-  $('#fit-legend').hidden = isCut || !viewer.fitMode;
+  $('#draft-view').hidden = !isDraft;
+  $('#three').style.visibility = isCut || isDraft ? 'hidden' : 'visible';
+  $$('.no-webgl').forEach(n => { n.hidden = isCut || isDraft; });
+  $('#viewbar').hidden = isCut || isDraft;
+  $('#fit-legend').hidden = isCut || isDraft || !viewer.fitMode;
+  if (isDraft) $('#pattern-card').hidden = true;
   if (isCut) { $('#pattern-card').hidden = true; refreshCut(); }
 }
 $$('.mode').forEach(b => { b.onclick = () => setMode(b.dataset.mode); });

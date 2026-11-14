@@ -272,6 +272,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); height: 22px; }
 .steps { margin: 6px 0 0; padding-left: 20px; font-size: 13px; color: var(--ink-2); }
 .steps li { margin: 5px 0; }
 .layout-view { position: absolute; inset: 0; overflow: auto; padding: 64px 24px 80px; }
+.draft-view { position: absolute; inset: 0; }
 .layout-view svg { display: block; margin: 0 auto; background: #fffdf9; box-shadow: var(--shadow); border-radius: 4px; touch-action: none; }
 .layout-view .piece { cursor: grab; }
 .layout-view .piece.overlap .cut { stroke: #d33; fill: rgba(220, 50, 50, .14); }
