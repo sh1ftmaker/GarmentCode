@@ -12,6 +12,10 @@ import { autoLayout, layoutLength, findProblems, regions, fabricToBuy } from './
 import { primitives, fabricPrims, toSVG, layoutPDF, patternPDF, planSheet, PAPERS, toDXF, yardText } from './export.js';
 import { ADAPTERS, fsInfo, fsList, ensureFS, fsDefaults, isFS, fsPattern, fsSVG, fsSettings, fsRandomize } from './fs/index.js';
 import { armAxes as computeArmAxes } from './fs/place.js';   // arm axes, for wrapping sleeves
+import { Workshop } from './workshop/editor.js';
+import { toPattern as customPattern } from './workshop/model.js';
+import { importGC } from './workshop/import.js';
+import { patternSVG as customSVG } from './workshop/svg.js';
 import { History, compactSnapshot, expandSnapshot, encodeShare, decodeShare, saves, profiles, lastState, prefs } from './state.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -34,6 +38,7 @@ const S = {
   fabric: { id: 'cotton', color: '#c9d6ea', print: 'plain', bend: 0.55, stretch: 0.05, friction: 0.5, res: 2.0, release: false, selfCollide: true },
   template: 'tee',
   source: null,   // null = GarmentCode (Pyodide); else a FreeSewing design id (src/fs)
+  custom: null,   // a pattern drawn in the Draft workshop (src/workshop/model.js); wins over source
   grain: { all: 'straight', pieces: {} },   // grain.js: garment-wide mode for skirt/bodice pieces + per-piece overrides
 };
 const defaults = { design: null, presets: {}, fsDesign: fsDefaults, isFS };
@@ -42,6 +47,7 @@ const viewer = new Viewer($('#three'));
 const bodies = {};            // base name -> { base, prep, sdfBuf }
 let sdf = null, sdfReady = Promise.resolve(), sdfToken = 0;
 let sim = null, pattern = null, genToken = 0, paused = false, flat = false;
+let workshop = null;   // the Draft workshop (src/workshop/editor.js), created below
 const cut = { pieces: null, layout: null, alt: null, edited: false, key: '', sa: 1.5, folded: false, job: 0, material: null };
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -90,6 +96,7 @@ function updateBodyMesh() {
   curBody = { pos, part: b.base.part };
   armAxes = computeArmAxes(pos, b.base.part);
   bodyPos = pos;
+  workshop?.bodyChanged();
 }
 
 /**
@@ -157,9 +164,10 @@ async function regenerate() {
   status('Drafting pattern…', true);
   let pat;
   try {
-    pat = S.source
-      ? await fsPattern(S.source, S.design, S.measurements, curBody, { res: S.fabric.res, drape: true })
-      : await py('generate', { resolution: S.fabric.res });
+    pat = S.custom ? customPattern(S.custom, S.measurements, { res: S.fabric.res, drape: true })
+      : S.source
+        ? await fsPattern(S.source, S.design, S.measurements, curBody, { res: S.fabric.res, drape: true })
+        : await py('generate', { resolution: S.fabric.res });
   } catch (e) {
     if (token !== genToken) return;
     console.error(e.full || e);
@@ -172,7 +180,8 @@ async function regenerate() {
   pattern = pat;
   cut.key = '';
   const w = [];
-  if (!pat.panels.length) w.push('Empty design: choose a top, waistband or bottom under “Garment”.');
+  if (!pat.panels.length && !S.custom) w.push('Empty design: choose a top, waistband or bottom under “Garment”.');
+  if (S.custom && pat.errors?.length) w.push(`Pattern: ${pat.errors.slice(0, 2).join(' ')}`);
   const tight = tightLegOpening(pat);
   if (tight) w.push(`The trouser legs are narrower than the leg (opening ${Math.round(tight.hem)} cm, leg ${Math.round(tight.leg)} cm), so they can't go on without stretch fabric and the drape cuts into the leg. Increase the flare or width.`);
   if (pat.self_intersecting) {
@@ -180,7 +189,7 @@ async function regenerate() {
     const list = names.map(n => n.toLowerCase()).join(' and ') || 'a panel';
     w.push(`Pattern issue: the ${names.length > 1 ? 'outlines' : 'outline'} of the ${list} ${names.length > 1 ? 'cross themselves' : 'crosses itself'}, so the drape may look odd. Usually a neckline or armhole that's too deep or wide for this body.`);
   }
-  if (pat.noDrape) w.push(`${fsInfo(S.source).name} has no 3D drape yet, so the mannequin stays bare. Open the pattern (Pattern button) or the Cutting tab to see its ${pat.panels.length} pieces.`);
+  if (pat.noDrape && !S.custom) w.push(`${fsInfo(S.source).name} has no 3D drape yet, so the mannequin stays bare. Open the pattern (Pattern button) or the Cutting tab to see its ${pat.panels.length} pieces.`);
   if (pat.warnings?.length) w.push(`FreeSewing: ${pat.warnings.join(' ')}`);
   warn(w.join(' '));
   startDrape();
@@ -249,7 +258,7 @@ function updateDrapeChip() {
 }
 
 // ---------------------------------------------------------------- history / snapshots
-const snapshot = () => ({ source: S.source, design: S.design, base: S.base, measurements: S.measurements, fabric: { ...S.fabric }, grain: { all: S.grain.all, pieces: { ...S.grain.pieces } } });
+const snapshot = () => ({ source: S.source, custom: S.custom, design: S.design, base: S.base, measurements: S.measurements, fabric: { ...S.fabric }, grain: { all: S.grain.all, pieces: { ...S.grain.pieces } } });
 function syncUndoButtons() {
   $('#btn-undo').disabled = !undoStack.canUndo;
   $('#btn-redo').disabled = !undoStack.canRedo;
@@ -265,6 +274,7 @@ async function applySnapshot(snap, { record = true } = {}) {
   if (snap.fabric) Object.assign(S.fabric, snap.fabric);
   S.grain = { all: snap.grain?.all || 'straight', pieces: { ...(snap.grain?.pieces || {}) } };
   S.source = isFS(snap.source) ? snap.source : null;
+  S.custom = snap.custom || null;
   if (S.source) await ensureFS(S.source);
   if (S.source) {
     S.design = snap.design || fsDefaults(S.source);
@@ -277,6 +287,7 @@ async function applySnapshot(snap, { record = true } = {}) {
   await py('setBody', { name: S.base });
   await py('setBodyParams', { params: S.measurements });
   renderDesignUI(); renderBodyUI(); renderFabricUI(); applyFabricLook();
+  workshop.setDesign(S.custom);
   $('#body-select').value = S.base;
   updateBodyMesh();
   rebuildSDF();
@@ -370,7 +381,10 @@ function renderDesignUI() {
   renderTemplates();
   $('#export-menu [data-x="svg"]').textContent = S.source ? 'FreeSewing pattern SVG' : 'GarmentCode pattern SVG';
   $('#export-menu [data-x="spec"]').textContent = S.source ? 'FreeSewing settings JSON' : 'Pattern specification JSON';
-  $('#export-menu [data-x="design"]').hidden = !!S.source;
+  $('#export-menu [data-x="design"]').hidden = !!S.source || !!S.custom;
+  if (S.custom) { $('#export-menu [data-x="svg"]').textContent = 'Pattern drawing SVG'; $('#export-menu [data-x="spec"]').textContent = 'Pattern file (Draft, JSON)'; }
+  $('#param-search').closest('.toolrow').hidden = !!S.custom;
+  if (S.custom) return renderCustomUI(root);
   if (S.source) return renderFSDesignUI(root);
   const d = S.design, meta = d.meta;
   const g = grainControl(meta);
@@ -388,6 +402,20 @@ function renderDesignUI() {
     for (const g of other) { g.classList.add('dim'); root.append(g); }
   }
   if (!root.children.length) root.append(el('p', { class: 'muted' }, 'No parameters match your search.'));
+}
+
+/** A pattern from the Draft workshop: the design card says so; editing happens in Draft. */
+function renderCustomUI(root) {
+  const c = S.custom;
+  $('#cd-name').textContent = c.name;
+  $('#cd-kicker').innerHTML = 'My pattern <span class="pill drape">3D</span>';
+  $('#cd-desc').textContent = `Drawn in the Draft workshop · ${c.pieces.length} piece${c.pieces.length === 1 ? '' : 's'}, ${c.seams.length} seam${c.seams.length === 1 ? '' : 's'}.`;
+  $('#cd-thumb').innerHTML = '<svg viewBox="0 0 56 56" width="56" height="56" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 46 38 22"/><path d="m37 12 9 9-5 5-9-9z"/><path d="M14 46l2-7 5 5z"/></svg>';
+  $$('#templates .tpl.active').forEach(b => b.classList.remove('active'));
+  const b = el('button', { class: 'btn primary' }, 'Edit in Draft');
+  b.onclick = () => setMode('draft');
+  root.append(el('div', { class: 'custom-note' },
+    el('p', { class: 'muted' }, 'This is your own pattern. Change its pieces, seams and formulas in the Draft workspace; body measurements and fabric apply as usual.'), b));
 }
 
 /** Garment-wide grain (skirt and bodice pieces; grain.js), shown for skirts, dresses and tops. */
@@ -514,7 +542,7 @@ function pushRecent(key) { prefs.set({ recent: [key, ...recentKeys().filter(k =>
 async function selectGC(t) {
   if (!defaults.design) return;
   cut.material = null;
-  S.template = t.id; S.source = null;
+  S.template = t.id; S.source = null; S.custom = null;
   await py('setDesign', { design: applyTemplate(defaults.design, t) });
   S.design = await py('design');
   pushRecent(t.id);
@@ -525,7 +553,7 @@ async function selectGC(t) {
 async function selectFS(id) {
   cut.material = null;
   try { await ensureFS(id); } catch (e) { warn(e.message); return; }
-  S.source = id; S.template = `fs:${id}`;
+  S.source = id; S.template = `fs:${id}`; S.custom = null;
   S.design = fsDefaults(id);
   pushRecent(`fs:${id}`);
   renderDesignUI(); renderTemplates();
@@ -777,7 +805,8 @@ async function ensurePieces() {
   const note = measureNote();
   const key = `${genToken}|${sa}|${note}|${JSON.stringify(S.grain)}|${cut.material || ''}`;
   if (cut.key === key && cut.pieces) return false;
-  const data = S.source
+  const data = S.custom ? customPattern(S.custom, S.measurements, { res: 0.5, drape: false })
+    : S.source
     ? await fsPattern(S.source, S.design, S.measurements, curBody, { res: 0.5, drape: false, material: cut.material })   // the real (stretch) pattern
     : await py('pieces', { res: 0.5 });
   showMaterials(data);
@@ -986,6 +1015,41 @@ $('#btn-print-pdf').onclick = async () => { try { await cuttingExport(`pdf-${$('
   $('#paper').value = p.paper || (/^en-(US|CA)|^es-(MX|US)/.test(navigator.language || '') ? 'letter' : 'a4');
 }
 
+// ---------------------------------------------------------------- Draft workshop (pattern editor)
+let customTimer = 0;
+function openCustom(design, { commit = true, toast: msg = '' } = {}) {
+  S.custom = design; S.source = null; S.template = 'custom';
+  cut.material = null;
+  renderDesignUI();
+  if (commit) commitHistory();
+  workshop.setDesign(design);
+  clearTimeout(customTimer);
+  customTimer = setTimeout(() => regenerate(), 120);
+  if (msg) toast(msg);
+}
+function downloadCustom(design) {
+  download(`${(design.name || 'pattern').toLowerCase().replace(/[^a-z0-9]+/g, '-')}.pattern.json`, JSON.stringify({ format: 'gc3d-pattern', v: 1, design }, null, 1), 'application/json');
+}
+workshop = new Workshop($('#draft-panel'), $('#draft-view'), {
+  measurements: () => S.measurements,
+  body: () => (curBody && bodies[S.base] ? { pos: curBody.pos, idx: bodies[S.base].base.idx } : null),
+  apply: (design, { commit = true } = {}) => openCustom(design, { commit }),
+  canImport: () => !S.custom && !S.source && !!pattern?.panels?.length,
+  importCurrent: async () => {
+    const spec = JSON.parse(await py('specJson'));
+    const d = importGC(spec.pattern || spec, S.measurements, `${designTitle()} (my copy)`, (n) => pieceName(n));
+    if (!d.pieces.length) throw new Error('the design has no pieces');
+    return d;
+  },
+  toast,
+  saveToLibrary: (design) => {
+    const ok = saves.add({ id: Math.random().toString(36).slice(2), name: design.name, ts: Date.now(), thumb: viewer.thumbnail(), state: compactSnapshot({ ...snapshot(), custom: design }, defaults) });
+    toast(ok ? `Saved “${design.name}” to My designs` : 'Could not save: browser storage is full or unavailable.');
+  },
+  download: downloadCustom,
+  split: (on) => { $('#stage').classList.toggle('split', !!on && S.mode === 'draft'); },
+});
+
 // ---------------------------------------------------------------- modes
 function setMode(mode) {
   S.mode = mode;
@@ -998,7 +1062,7 @@ function setMode(mode) {
   $$('.no-webgl').forEach(n => { n.hidden = isCut || isDraft; });
   $('#viewbar').hidden = isCut || isDraft;
   $('#fit-legend').hidden = isCut || isDraft || !viewer.fitMode;
-  if (isDraft) $('#pattern-card').hidden = true;
+  if (isDraft) { $('#pattern-card').hidden = true; workshop.shown(); } else $('#stage').classList.remove('split');
   if (isCut) { $('#pattern-card').hidden = true; refreshCut(); }
 }
 $$('.mode').forEach(b => { b.onclick = () => setMode(b.dataset.mode); });
@@ -1030,7 +1094,7 @@ $('#btn-fit').onclick = () => {
 $('#btn-body').onclick = () => { const on = !$('#btn-body').classList.contains('on'); $('#btn-body').classList.toggle('on', on); viewer.showBody(on); };
 $('#btn-camera').onclick = () => { if (viewer.ok) viewer.resetCamera(); };
 async function refreshPatternSVG() {
-  try { $('#pattern-svg').innerHTML = (S.source ? await fsSVG(S.source, S.design, S.measurements, curBody) : await py('svg', { grains: pattern ? pieceGrains(pattern, S.grain) : {} })) || '<p class="muted">Empty pattern</p>'; }
+  try { $('#pattern-svg').innerHTML = (S.custom ? customSVG(customPattern(S.custom, S.measurements, { res: 0.5, drape: false })) : S.source ? await fsSVG(S.source, S.design, S.measurements, curBody) : await py('svg', { grains: pattern ? pieceGrains(pattern, S.grain) : {} })) || '<p class="muted">Empty pattern</p>'; }
   catch (e) { $('#pattern-svg').textContent = `Could not draw the pattern: ${e.message}`; }
 }
 $('#btn-pattern').onclick = () => {
@@ -1058,6 +1122,12 @@ $('#file-input').onchange = async (e) => {
   if (!f) return;
   try {
     const text = await f.text();
+    const json = /^\s*\{/.test(text) ? (() => { try { return JSON.parse(text); } catch { return null; } })() : null;
+    if (json && (json.format === 'gc3d-pattern' || (Array.isArray(json.pieces) && Array.isArray(json.seams)))) {
+      openCustom(json.design || json, { toast: `Opened “${(json.design || json).name}”` });
+      e.target.value = '';
+      return;
+    }
     if (/^\s*body\s*:/m.test(text) && !/^\s*design\s*:/m.test(text)) {
       const params = {};
       for (const line of text.split('\n')) { const m = line.match(/^\s+([a-z_]+):\s*([-0-9.eE]+)\s*$/); if (m) params[m[1]] = +m[2]; }
@@ -1171,7 +1241,7 @@ function download(name, data, type = 'text/plain') {
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
-const designTitle = () => (S.source ? fsInfo(S.source).name : TEMPLATES.find(t => t.id === S.template)?.name || 'Custom design');
+const designTitle = () => (S.custom ? S.custom.name : S.source ? fsInfo(S.source).name : TEMPLATES.find(t => t.id === S.template)?.name || 'Custom design');
 const slug = () => designTitle().toLowerCase().replace(/[^a-z0-9]+/g, '-');
 function garmentOBJ() {
   if (!sim) return '';
@@ -1219,6 +1289,10 @@ $('#export-menu').addEventListener('click', async (e) => {
   $('#export-menu').hidden = true;
   try {
     if (['pdf-a4', 'pdf-letter', 'pdf-a0', 'pdf-roll36', 'pdf-full', 'svg-layout', 'svg-sheet', 'dxf'].includes(k)) return await cuttingExport(k);
+    if (S.custom && ['svg', 'spec', 'design'].includes(k)) {   // a Draft pattern: its drawing + the pattern file
+      if (k === 'svg') return download(`${slug()}-pattern.svg`, customSVG(customPattern(S.custom, S.measurements, { res: 0.5, drape: false })), 'image/svg+xml');
+      return downloadCustom(S.custom);
+    }
     if (S.source && ['svg', 'spec', 'design'].includes(k)) {   // FreeSewing: its own drawing + settings
       if (k === 'svg') return download(`${slug()}-freesewing.svg`, await fsSVG(S.source, S.design, S.measurements, curBody), 'image/svg+xml');
       return download(`${slug()}-freesewing-settings.json`, JSON.stringify(await fsSettings(S.source, S.design, S.measurements, curBody), null, 2), 'application/json');
@@ -1299,4 +1373,4 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 }
 
 // debugging handle (used by the automated visual tests)
-window.__gc = { viewer, selectDesign, get sim() { return sim; }, get sdf() { return sdf; }, get pattern() { return pattern; }, get state() { return S; } };
+window.__gc = { viewer, selectDesign, workshop, openCustom, get sim() { return sim; }, get sdf() { return sdf; }, get pattern() { return pattern; }, get state() { return S; } };

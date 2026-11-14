@@ -47,12 +47,13 @@ export function compactSnapshot(snap, defaults) {
   // grain (v3): { a: garment-wide mode, p: { piece: mode } }, only when not all straight
   const gr = snap.grain || {}, gp = Object.fromEntries(Object.entries(gr.pieces || {}).filter(([, v]) => v));
   const g = (gr.all && gr.all !== 'straight') || Object.keys(gp).length ? { ...(gr.all && gr.all !== 'straight' ? { a: gr.all } : {}), ...(Object.keys(gp).length ? { p: gp } : {}) } : null;
-  return { v: 3, ...(snap.source ? { s: snap.source } : {}), d, b: snap.base, m, f: snap.fabric, ...(g ? { g } : {}) };
+  return { v: 3, ...(snap.source ? { s: snap.source } : {}), ...(snap.custom ? { c: snap.custom } : {}), d, b: snap.base, m, f: snap.fabric, ...(g ? { g } : {}) };
 }
 export function expandSnapshot(c, defaults) {
   const source = c.s && defaults.isFS?.(c.s) ? c.s : null;   // older links have no source: GarmentCode
   return {
     source,
+    custom: c.c || null,   // a Draft workshop pattern (src/workshop/model.js)
     design: applyValues(designDefaults(source, defaults), c.d || {}),
     base: c.b || 'neutral',
     measurements: { ...(defaults.presets[c.b || 'neutral'] || {}), ...(c.m || {}) },

@@ -250,6 +250,13 @@ function alignSleeves(panels, armAxes) {
     }
     const th = 0.5 * Math.atan2(2 * sxy, sxx - syy);
     let dx = Math.cos(th), dy = Math.sin(th);
+    // a pattern can say which way its sleeves point (short, wide sleeves have no clear
+    // principal direction): the pattern editor's sleeves (src/workshop) do
+    const given = group.map(q => q.p.sleeveDir).filter(Boolean);
+    if (given.length) {
+      dx = given.reduce((a, d) => a + d[0], 0); dy = given.reduce((a, d) => a + d[1], 0);
+      const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l;
+    }
     if (dx * sgn < 0) { dx = -dx; dy = -dy; }            // pointing away from the body
     // arm direction (towards the hand) in the frontal plane
     let axx = ax.a[0], axy = ax.a[1];
